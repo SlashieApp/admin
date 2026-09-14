@@ -1,15 +1,28 @@
+import 'dotenv/config'
 import type { CodegenConfig } from '@graphql-codegen/cli'
 
+const graphqlOrigin = (
+  process.env.NEXT_PUBLIC_GRAPHQL_URL?.trim() || 'https://api.slashie.app'
+).replace(/\/$/, '')
+
 /**
- * Codegen against the local BE-42 contract (`schema/admin.graphql`).
- * Existing Task / worker / auth types match live apollo introspection
- * (https://api.slashie.app/graphql). Admin fields are the proposed BE-42 API.
+ * Codegen against the live Apollo SDL (`${origin}/schema`).
+ * Requires SCHEMA_ACCESS_TOKEN (`X-Schema-Token`).
  *
- * To regenerate from a live schema instead:
- *   schema: [{ [`${process.env.NEXT_PUBLIC_GRAPHQL_URL}/schema`]: { headers: { 'X-Schema-Token': process.env.SCHEMA_ACCESS_TOKEN || '' }, handleAsSDL: true } }]
+ * To use the local BE-42 contract instead:
+ *   schema: 'schema/admin.graphql'
  */
 const config: CodegenConfig = {
-  schema: 'schema/admin.graphql',
+  schema: [
+    {
+      [`${graphqlOrigin}/schema`]: {
+        headers: {
+          'X-Schema-Token': process.env.SCHEMA_ACCESS_TOKEN || '',
+        },
+        handleAsSDL: true,
+      },
+    },
+  ],
   documents: ['src/graphql/**/*.ts'],
   ignoreNoDocuments: true,
   generates: {

@@ -67,6 +67,7 @@ const TASK_PUBLIC_FIELDS = gql`
     category
     status
     views
+    hidden
     budget {
       amount
       currency
@@ -137,8 +138,8 @@ const WORKER_FIELDS = gql`
 
 export const AdminTasks = gql`
   ${TASK_ADMIN_FIELDS}
-  query AdminTasks($search: String, $id: ID) {
-    adminTasks(search: $search, id: $id) {
+  query AdminTasks($filter: AdminTaskFilter, $first: Int) {
+    adminTasks(filter: $filter, first: $first) {
       ...TaskAdminFields
     }
   }

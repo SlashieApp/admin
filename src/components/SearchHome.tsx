@@ -14,7 +14,7 @@ import {
   graphqlErrorMessage,
   isMissingAdminFieldError,
 } from '@/lib/graphqlErrors'
-import { toAdminSearchVariables } from '@/lib/search'
+import { toAdminSearchVariables, toAdminTaskVariables } from '@/lib/search'
 import type {
   AdminTasksQuery,
   AdminWorkersQuery,
@@ -171,11 +171,10 @@ async function searchTasks(query: string): Promise<{
   rows: TaskHit[]
   fallback: boolean
 }> {
-  const vars = toAdminSearchVariables(query)
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
-      variables: vars,
+      variables: toAdminTaskVariables(query),
       fetchPolicy: 'network-only',
     })
     return { rows: result.data?.adminTasks ?? [], fallback: false }

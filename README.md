@@ -22,15 +22,17 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## GraphQL (BE-42)
 
-Operations live in `src/graphql/operations.ts`. The local contract is `schema/admin.graphql` (marketplace types from live apollo introspection + proposed admin fields).
+Operations live in `src/graphql/operations.ts`. Types are generated from the live Apollo SDL (`${NEXT_PUBLIC_GRAPHQL_URL}/schema`).
 
 | Operation | Signature |
 | --- | --- |
-| `adminTasks` | `(search: String, id: ID): [Task!]!` |
-| `adminWorkers` | `(search: String, id: ID): [worker!]!` |
+| `adminTasks` | `(filter: AdminTaskFilter, first: Int = 50): [Task!]!` |
+| `adminWorkers` | `(search: String, id: ID, first: Int = 50): [worker!]!` |
 | `adminUpdateTask` | `(id: ID!, input: AdminUpdateTaskInput!): Task!` |
 
-`AdminUpdateTaskInput`: `title`, `description`, `status`, `category`, `location`, `budget`, `hidden`.
+`AdminTaskFilter`: `search`, `id`, `status`, `hidden`.
+
+`AdminUpdateTaskInput`: `title`, `description`, `status`, `category`, `location`, `budget`, `datetime`, `hidden`, `preferredContactMethod`, `acceptedWorkerCap`.
 
 If those fields are not on the pointed-at API yet, search/detail **falls back** to public `tasks` / `task` / `workers` / `worker`. God-mode save has no fallback — it requires `adminUpdateTask`.
 
@@ -42,7 +44,7 @@ Copy `.env.example` to `.env.local`:
 | --- | --- | --- |
 | `NEXT_PUBLIC_GRAPHQL_URL` | yes | Apollo origin, no trailing slash. Client calls `${url}/graphql`. Default in code: `https://api.slashie.app`. Use local/staging apollo that has BE-42 for god-mode. |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | yes | GIS client ID. |
-| `SCHEMA_ACCESS_TOKEN` | no | Only if you switch `codegen.ts` to remote SDL (`/schema`). |
+| `SCHEMA_ACCESS_TOKEN` | yes (codegen) | Sent as `X-Schema-Token` when fetching the live SDL (`/schema`). |
 
 ## Run
 

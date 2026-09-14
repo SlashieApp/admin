@@ -306,7 +306,7 @@ async function loadTask(id: string): Promise<{
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
-      variables: { id, search: id },
+      variables: { filter: { id } },
       fetchPolicy: 'network-only',
     })
     const task = result.data?.adminTasks?.[0]
