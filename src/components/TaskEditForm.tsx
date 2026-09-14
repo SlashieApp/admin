@@ -3,7 +3,12 @@
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-import { AdminTasks, AdminUpdateTask, Task } from '@/graphql/operations'
+import {
+  AdminTasks,
+  AdminTasksLegacy,
+  AdminUpdateTask,
+  TaskCore,
+} from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import {
   graphqlErrorMessage,
@@ -18,16 +23,18 @@ import {
 } from '@/lib/taskInput'
 import { Currency, TaskBudgetType, TaskPaymentMethod } from '@codegen/schema'
 import type {
+  AdminTasksLegacyQuery,
   AdminTasksQuery,
   AdminUpdateTaskMutation,
-  TaskQuery,
+  TaskCoreQuery,
 } from '@codegen/schema'
 
 type Props = {
   taskId: string
+  hidePageHead?: boolean
 }
 
-export function TaskEditForm({ taskId }: Props) {
+export function TaskEditForm({ taskId, hidePageHead }: Props) {
   const router = useRouter()
   const [values, setValues] = useState<TaskEditFormValues | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -103,18 +110,22 @@ export function TaskEditForm({ taskId }: Props) {
   if (!values) return <p className="muted">Task not found.</p>
 
   return (
-    <form className="stack form" onSubmit={(e) => void onSubmit(e)}>
-      <div className="page-head">
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => router.push('/')}
-        >
-          ← Search
-        </button>
-        <h1>Edit task</h1>
-        <p className="mono muted">{taskId}</p>
-      </div>
+    <form className="stack form section" onSubmit={(e) => void onSubmit(e)}>
+      {hidePageHead ? (
+        <h2>God-mode edit</h2>
+      ) : (
+        <div className="page-head">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => router.push('/')}
+          >
+            ← Tasks
+          </button>
+          <h1>Edit task</h1>
+          <p className="mono muted">{taskId}</p>
+        </div>
+      )}
 
       {usedFallback ? (
         <p className="banner banner-warn">
@@ -300,13 +311,13 @@ export function TaskEditForm({ taskId }: Props) {
 }
 
 async function loadTask(id: string): Promise<{
-  task: NonNullable<AdminTasksQuery['adminTasks']>[number]
+  task: AdminTasksQuery['adminTasks'][number]
   fallback: boolean
 }> {
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
-      variables: { filter: { id } },
+      variables: { filter: { id }, first: 1 },
       fetchPolicy: 'network-only',
     })
     const task = result.data?.adminTasks?.[0]
@@ -315,8 +326,20 @@ async function loadTask(id: string): Promise<{
     if (!isMissingAdminFieldError(error)) throw error
   }
 
-  const result = await apolloClient.query<TaskQuery>({
-    query: Task,
+  try {
+    const result = await apolloClient.query<AdminTasksLegacyQuery>({
+      query: AdminTasksLegacy,
+      variables: { id, search: id },
+      fetchPolicy: 'network-only',
+    })
+    const task = result.data?.adminTasks?.[0]
+    if (task) return { task, fallback: false }
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  const result = await apolloClient.query<TaskCoreQuery>({
+    query: TaskCore,
     variables: { id },
     fetchPolicy: 'network-only',
   })

@@ -1,10 +1,10 @@
-import { TaskEditForm } from '@/components/TaskEditForm'
+import { TaskDossier } from '@/components/TaskDossier'
 
-export default async function TaskEditPage({
+export default async function TaskPage({
   params,
 }: {
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  return <TaskEditForm taskId={id} />
+  return <TaskDossier taskId={id} />
 }
