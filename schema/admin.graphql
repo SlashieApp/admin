@@ -9,15 +9,27 @@ admin expansions. `@admin` fields:
   adminWorkers(search: String, id: ID, first: Int): [worker!]!
   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
+  adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 100, after: String): ReportPage!
   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
+  adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
+
+BE-46 report inbox is `@admin` (Admin collection + `@slashie.app`). It does
+not require env `ADMIN_EMAILS` / `ADMIN_USER_IDS`. The BE-40 env-allowlist
+`reports` / `updateReportStatus` fields stay for existing tools; the panel
+falls back to them when `adminReports` is not deployed yet.
+
+Default inbox view: omit `status` (all statuses, newest first from the API)
+and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
+actionable reports without hiding history.
 
 Legacy BE-42 `adminTasks(search, id)` args are kept so the panel can fall
 back if an environment has not switched to `filter`.
 
 See https://linear.app/slashie/issue/BE-42
 See https://linear.app/slashie/issue/BE-43
+See https://linear.app/slashie/issue/BE-46
 """
 
 scalar DateTime
@@ -417,6 +429,53 @@ type AdminOpsSummary {
   tasksByStatus: [AdminTaskStatusCount!]!
 }
 
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  ILLEGAL_OR_PROHIBITED
+  SCAM
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  ACTIONED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  TASK
+  WORKER
+  USER
+}
+
+"""
+Trust-and-safety report. BE-46 enriches `reporter` and `targetTitle` for ops.
+BE-40 payloads always include reporterUserId + target fields.
+"""
+type Report {
+  id: ID!
+  targetId: ID!
+  targetType: ReportTargetType!
+  reason: ReportReason!
+  details: String
+  status: ReportStatus!
+  targetUrl: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  reporterUserId: ID!
+  reporter: User
+  """Linked task title when targetType is TASK (BE-46)."""
+  targetTitle: String
+}
+
+type ReportPage {
+  items: [Report!]!
+  """Opaque cursor (report id) for the next page, or null when done."""
+  nextCursor: String
+}
+
 type Query {
   me: User!
   task(id: ID!): Task
@@ -444,6 +503,25 @@ type Query {
     dateFrom: DateTime
     dateTo: DateTime
   ): AdminOpsSummary!
+  """
+  BE-46 @admin — full ops report inbox. Newest first. Paginate with after.
+  Omit status for all statuses. Pass targetType: TASK for the default inbox.
+  """
+  adminReports(
+    status: ReportStatus
+    targetType: ReportTargetType
+    first: Int = 100
+    after: String
+  ): ReportPage!
+  """
+  BE-40 env-allowlist inbox (ADMIN_EMAILS / ADMIN_USER_IDS). Kept for existing
+  tools. No targetType arg — the panel filters TASK client-side when falling back.
+  """
+  reports(
+    status: ReportStatus
+    first: Int
+    after: String
+  ): ReportPage!
 }
 
 type Mutation {
@@ -454,4 +532,8 @@ type Mutation {
   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
   """BE-43 @admin — disable or re-enable a user if the API ships it."""
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
+  """BE-46 @admin — set report status. Does not require ADMIN_EMAILS."""
+  adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
+  """BE-40 env-allowlist status update. Kept for existing tools."""
+  updateReportStatus(id: ID!, status: ReportStatus!): Report!
 }

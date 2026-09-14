@@ -23,15 +23,27 @@ export type Scalars = {
    *   adminWorkers(search: String, id: ID, first: Int): [worker!]!
    *   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
    *   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
+   *   adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 100, after: String): ReportPage!
    *   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
    *   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
    *   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
+   *   adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
+   *
+   * BE-46 report inbox is `@admin` (Admin collection + `@slashie.app`). It does
+   * not require env `ADMIN_EMAILS` / `ADMIN_USER_IDS`. The BE-40 env-allowlist
+   * `reports` / `updateReportStatus` fields stay for existing tools; the panel
+   * falls back to them when `adminReports` is not deployed yet.
+   *
+   * Default inbox view: omit `status` (all statuses, newest first from the API)
+   * and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
+   * actionable reports without hiding history.
    *
    * Legacy BE-42 `adminTasks(search, id)` args are kept so the panel can fall
    * back if an environment has not switched to `filter`.
    *
    * See https://linear.app/slashie/issue/BE-42
    * See https://linear.app/slashie/issue/BE-43
+   * See https://linear.app/slashie/issue/BE-46
    */
   DateTime: { input: any; output: any; }
   JSON: { input: any; output: any; }
@@ -168,17 +180,27 @@ export enum LoginMethod {
 export type Mutation = {
   /** BE-43 @admin — disable or re-enable a user if the API ships it. */
   adminSetUserDisabled: User;
+  /** BE-46 @admin — set report status. Does not require ADMIN_EMAILS. */
+  adminUpdateReportStatus: Report;
   /** BE-42 @admin — god-mode task update (ignores owner checks). */
   adminUpdateTask: Task;
   /** BE-43 @admin — ops profile / verification updates. */
   adminUpdateUser: User;
   loginWithMethod: AuthPayload;
+  /** BE-40 env-allowlist status update. Kept for existing tools. */
+  updateReportStatus: Report;
 };
 
 
 export type MutationAdminSetUserDisabledArgs = {
   disabled: Scalars['Boolean']['input'];
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationAdminUpdateReportStatusArgs = {
+  id: Scalars['ID']['input'];
+  status: ReportStatus;
 };
 
 
@@ -196,6 +218,12 @@ export type MutationAdminUpdateUserArgs = {
 
 export type MutationLoginWithMethodArgs = {
   input: LoginInput;
+};
+
+
+export type MutationUpdateReportStatusArgs = {
+  id: Scalars['ID']['input'];
+  status: ReportStatus;
 };
 
 export type Notification = {
@@ -267,6 +295,11 @@ export type Profile = {
 export type Query = {
   /** BE-44 @admin — Mongo-authoritative ops KPIs. */
   adminOpsSummary: AdminOpsSummary;
+  /**
+   * BE-46 @admin — full ops report inbox. Newest first. Paginate with after.
+   * Omit status for all statuses. Pass targetType: TASK for the default inbox.
+   */
+  adminReports: ReportPage;
   /** BE-43 @admin — full related records for one task. */
   adminTask: AdminTaskDossier;
   /** BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page. */
@@ -277,6 +310,11 @@ export type Query = {
   adminWorkers: Array<Worker>;
   me: User;
   order?: Maybe<Order>;
+  /**
+   * BE-40 env-allowlist inbox (ADMIN_EMAILS / ADMIN_USER_IDS). Kept for existing
+   * tools. No targetType arg — the panel filters TASK client-side when falling back.
+   */
+  reports: ReportPage;
   task?: Maybe<Task>;
   tasks: Array<Task>;
   worker?: Maybe<Worker>;
@@ -288,6 +326,14 @@ export type QueryAdminOpsSummaryArgs = {
   dateFrom?: InputMaybe<Scalars['DateTime']['input']>;
   dateTo?: InputMaybe<Scalars['DateTime']['input']>;
   range: AdminOpsRange;
+};
+
+
+export type QueryAdminReportsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  status?: InputMaybe<ReportStatus>;
+  targetType?: InputMaybe<ReportTargetType>;
 };
 
 
@@ -321,6 +367,13 @@ export type QueryAdminWorkersArgs = {
 export type QueryOrderArgs = {
   id?: InputMaybe<Scalars['ID']['input']>;
   taskId?: InputMaybe<Scalars['ID']['input']>;
+};
+
+
+export type QueryReportsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  status?: InputMaybe<ReportStatus>;
 };
 
 
@@ -363,6 +416,53 @@ export enum QuoteStatus {
   Pending = 'PENDING',
   Rejected = 'REJECTED',
   Withdrawn = 'WITHDRAWN'
+}
+
+/**
+ * Trust-and-safety report. BE-46 enriches `reporter` and `targetTitle` for ops.
+ * BE-40 payloads always include reporterUserId + target fields.
+ */
+export type Report = {
+  createdAt: Scalars['DateTime']['output'];
+  details?: Maybe<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  reason: ReportReason;
+  reporter?: Maybe<User>;
+  reporterUserId: Scalars['ID']['output'];
+  status: ReportStatus;
+  targetId: Scalars['ID']['output'];
+  /** Linked task title when targetType is TASK (BE-46). */
+  targetTitle?: Maybe<Scalars['String']['output']>;
+  targetType: ReportTargetType;
+  targetUrl?: Maybe<Scalars['String']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type ReportPage = {
+  items: Array<Report>;
+  /** Opaque cursor (report id) for the next page, or null when done. */
+  nextCursor?: Maybe<Scalars['String']['output']>;
+};
+
+export enum ReportReason {
+  Harassment = 'HARASSMENT',
+  IllegalOrProhibited = 'ILLEGAL_OR_PROHIBITED',
+  Other = 'OTHER',
+  Scam = 'SCAM',
+  Spam = 'SPAM'
+}
+
+export enum ReportStatus {
+  Actioned = 'ACTIONED',
+  Dismissed = 'DISMISSED',
+  Open = 'OPEN',
+  Reviewed = 'REVIEWED'
+}
+
+export enum ReportTargetType {
+  Task = 'TASK',
+  User = 'USER',
+  Worker = 'WORKER'
 }
 
 export type ServiceArea = {
@@ -653,6 +753,55 @@ export type AdminSetUserDisabledMutationVariables = Exact<{
 
 
 export type AdminSetUserDisabledMutation = { adminSetUserDisabled: { id: string, email: string, emailVerified: boolean, phoneVerified?: boolean | null, createdAt?: any | null, disabled: boolean, profile?: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null, bio?: string | null } | null, worker?: { id: string, userId?: string | null, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification?: IdentityVerificationStatus | null, skills?: Array<string> | null, phoneVerified?: boolean | null, emailVerified?: boolean | null, memberSince?: any | null, serviceAreaLabel?: string | null, profile?: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null } | null, ratingSummary?: { average?: number | null, count: number } | null } | null } };
+
+export type ReportFieldsFragment = { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, targetTitle?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null };
+
+export type ReportCoreFieldsFragment = { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string };
+
+export type AdminReportsQueryVariables = Exact<{
+  status?: InputMaybe<ReportStatus>;
+  targetType?: InputMaybe<ReportTargetType>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AdminReportsQuery = { adminReports: { nextCursor?: string | null, items: Array<{ id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, targetTitle?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null }> } };
+
+export type AdminReportsCoreQueryVariables = Exact<{
+  status?: InputMaybe<ReportStatus>;
+  targetType?: InputMaybe<ReportTargetType>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AdminReportsCoreQuery = { adminReports: { nextCursor?: string | null, items: Array<{ id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string }> } };
+
+export type ReportsQueryVariables = Exact<{
+  status?: InputMaybe<ReportStatus>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ReportsQuery = { reports: { nextCursor?: string | null, items: Array<{ id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string }> } };
+
+export type AdminUpdateReportStatusMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  status: ReportStatus;
+}>;
+
+
+export type AdminUpdateReportStatusMutation = { adminUpdateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string } };
+
+export type UpdateReportStatusMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  status: ReportStatus;
+}>;
+
+
+export type UpdateReportStatusMutation = { updateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string } };
 
 export type AdminOpsSummaryQueryVariables = Exact<{
   range: AdminOpsRange;

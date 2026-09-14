@@ -7,7 +7,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Slashie Admin',
-  description: 'Private Slashie ops admin — dashboard, tasks, users.',
+  description: 'Private Slashie ops admin — dashboard, tasks, users, reports.',
   robots: { index: false, follow: false },
 }
 

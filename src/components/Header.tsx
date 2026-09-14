@@ -51,6 +51,9 @@ function HeaderNavFallback() {
       <Link href="/?mode=users" className="tab">
         Users
       </Link>
+      <Link href="/reports" className="tab">
+        Reports
+      </Link>
     </nav>
   )
 }
@@ -60,10 +63,15 @@ function HeaderNav() {
   const params = useSearchParams()
   const homeMode = parseAdminHomeMode(params.get('mode'))
   const dashboardActive = pathname.startsWith('/dashboard')
+  const reportsActive = pathname.startsWith('/reports')
   const usersActive =
     pathname.startsWith('/users') ||
     (pathname === '/' && homeMode === 'users')
-  const tasksActive = !dashboardActive && !usersActive
+  const tasksActive =
+    !dashboardActive &&
+    !reportsActive &&
+    (pathname.startsWith('/tasks') ||
+      (pathname === '/' && homeMode !== 'users'))
 
   return (
     <nav className="header-nav" aria-label="Admin sections">
@@ -81,6 +89,12 @@ function HeaderNav() {
         className={usersActive ? 'tab is-active' : 'tab'}
       >
         Users
+      </Link>
+      <Link
+        href="/reports"
+        className={reportsActive ? 'tab is-active' : 'tab'}
+      >
+        Reports
       </Link>
     </nav>
   )

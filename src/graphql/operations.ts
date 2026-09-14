@@ -415,6 +415,118 @@ export const AdminSetUserDisabled = gql`
   }
 `
 
+const REPORT_FIELDS = gql`
+  fragment ReportFields on Report {
+    id
+    targetId
+    targetType
+    reason
+    details
+    status
+    targetUrl
+    createdAt
+    updatedAt
+    reporterUserId
+    targetTitle
+    reporter {
+      id
+      email
+      profile {
+        name
+      }
+    }
+  }
+`
+
+const REPORT_CORE_FIELDS = gql`
+  fragment ReportCoreFields on Report {
+    id
+    targetId
+    targetType
+    reason
+    details
+    status
+    targetUrl
+    createdAt
+    updatedAt
+    reporterUserId
+  }
+`
+
+export const AdminReports = gql`
+  ${REPORT_FIELDS}
+  query AdminReports(
+    $status: ReportStatus
+    $targetType: ReportTargetType
+    $first: Int
+    $after: String
+  ) {
+    adminReports(
+      status: $status
+      targetType: $targetType
+      first: $first
+      after: $after
+    ) {
+      nextCursor
+      items {
+        ...ReportFields
+      }
+    }
+  }
+`
+
+export const AdminReportsCore = gql`
+  ${REPORT_CORE_FIELDS}
+  query AdminReportsCore(
+    $status: ReportStatus
+    $targetType: ReportTargetType
+    $first: Int
+    $after: String
+  ) {
+    adminReports(
+      status: $status
+      targetType: $targetType
+      first: $first
+      after: $after
+    ) {
+      nextCursor
+      items {
+        ...ReportCoreFields
+      }
+    }
+  }
+`
+
+export const Reports = gql`
+  ${REPORT_CORE_FIELDS}
+  query Reports($status: ReportStatus, $first: Int, $after: String) {
+    reports(status: $status, first: $first, after: $after) {
+      nextCursor
+      items {
+        ...ReportCoreFields
+      }
+    }
+  }
+`
+
+export const AdminUpdateReportStatus = gql`
+  ${REPORT_CORE_FIELDS}
+  mutation AdminUpdateReportStatus($id: ID!, $status: ReportStatus!) {
+    adminUpdateReportStatus(id: $id, status: $status) {
+      ...ReportCoreFields
+    }
+  }
+`
+
+export const UpdateReportStatus = gql`
+  ${REPORT_CORE_FIELDS}
+  mutation UpdateReportStatus($id: ID!, $status: ReportStatus!) {
+    updateReportStatus(id: $id, status: $status) {
+      ...ReportCoreFields
+    }
+  }
+`
+
 export const AdminOpsSummary = gql`
   query AdminOpsSummary($range: AdminOpsRange!) {
     adminOpsSummary(range: $range) {

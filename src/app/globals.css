@@ -61,6 +61,7 @@ code,
 .header-nav {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -232,6 +233,31 @@ h1 {
   color: var(--brand-ink);
   background: var(--brand);
   border-color: var(--brand);
+}
+
+.pill-warn {
+  color: #3a2e14;
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.tabs.wrap {
+  flex-wrap: wrap;
+}
+
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.report-card .clamp {
+  margin: 0;
+}
+
+.report-status {
+  max-width: 220px;
 }
 
 .inline-link {

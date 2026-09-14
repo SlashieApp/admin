@@ -9,7 +9,7 @@ const schemaToken = process.env.SCHEMA_ACCESS_TOKEN?.trim() || ''
 
 /**
  * Prefer live Apollo SDL (`${origin}/schema` + X-Schema-Token) when
- * SCHEMA_ACCESS_TOKEN is set. Otherwise use the local BE-43/44 contract.
+ * SCHEMA_ACCESS_TOKEN is set. Otherwise use the local BE-43/44/46 contract.
  */
 const config: CodegenConfig = {
   schema: schemaToken
