@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 
+import { BrandLogo } from '@/components/BrandLogo'
 import { useAuth } from '@/lib/auth'
 
 export default function ForbiddenPage() {
@@ -10,6 +11,7 @@ export default function ForbiddenPage() {
   return (
     <main className="auth-main">
       <div className="auth-card">
+        <BrandLogo surface="light" />
         <h1>Not an admin</h1>
         <p>
           This panel is restricted to Slashie staff. Your Google account is not

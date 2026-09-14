@@ -112,7 +112,7 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
 
   return (
     <section className="stack">
-      <div>
+      <div className="page-intro">
         <h1>{mode === 'users' ? 'Users' : 'Tasks'}</h1>
         <p className="muted">
           {mode === 'users'
@@ -141,17 +141,19 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
       </div>
 
       <form className="search-row" onSubmit={onSubmit}>
-        <input
-          className="input"
-          value={q}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder={
-            mode === 'users'
-              ? 'Email, name, or user id'
-              : 'Task title, description, or id'
-          }
-          aria-label={mode === 'users' ? 'Search users' : 'Search tasks'}
-        />
+        <label className="field">
+          {mode === 'users' ? 'Search users' : 'Search tasks'}
+          <input
+            className="input"
+            value={q}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder={
+              mode === 'users'
+                ? 'Email, name, or user id'
+                : 'Task title, description, or id'
+            }
+          />
+        </label>
         <button className="btn btn-primary" type="submit" disabled={busy}>
           {busy ? 'Loading…' : 'Search'}
         </button>
@@ -159,6 +161,16 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
 
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
+
+      {busy &&
+      ((mode === 'users' && users.length === 0) ||
+        (mode === 'tasks' && tasks.length === 0)) ? (
+        <div className="list" aria-busy="true" aria-label="Loading results">
+          <div className="card skeleton-card" />
+          <div className="card skeleton-card" />
+          <div className="card skeleton-card" />
+        </div>
+      ) : null}
 
       {mode === 'users' ? (
         <ul className="list">

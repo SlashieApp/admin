@@ -70,7 +70,7 @@ export function GoogleSignIn() {
 
   return (
     <GoogleOAuthProvider clientId={clientId}>
-      <div className={busy ? 'oauth-wrap is-busy' : 'oauth-wrap'}>
+      <div className={busy ? 'oauth-wrap is-busy' : 'oauth-wrap'} aria-busy={busy}>
         <GoogleLogin
           onSuccess={(credentialResponse) => void onSuccess(credentialResponse)}
           onError={() =>
