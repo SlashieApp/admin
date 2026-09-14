@@ -38,12 +38,32 @@ export type ReportRow = {
   createdAt: unknown
   updatedAt?: unknown
   reporterUserId: string
-  targetTitle?: string | null
+  /** Live BE-46 field. Linked task title (or worker/user label). */
+  targetLabel?: string | null
+  reporterEmail?: string | null
   reporter?: {
     id: string
     email: string
     profile?: { name?: string | null } | null
   } | null
+}
+
+export type ReportApiPayload = {
+  id: string
+  targetId: string
+  targetType: ReportTargetType
+  reason: ReportReason
+  details?: string | null
+  status: ReportStatus
+  targetUrl?: string | null
+  createdAt: unknown
+  updatedAt?: unknown
+  reporterUserId: string
+  targetLabel?: string | null
+  /** Stub used before BE-46 shipped `targetLabel`. */
+  targetTitle?: string | null
+  reporterEmail?: string | null
+  reporter?: ReportRow['reporter']
 }
 
 export type ReportPage = {
@@ -136,7 +156,8 @@ export function reportTargetHref(report: ReportRow): string | null {
 export function reporterLabel(report: ReportRow): string {
   const name = report.reporter?.profile?.name?.trim()
   if (name) return name
-  const email = report.reporter?.email?.trim()
+  const email =
+    report.reporter?.email?.trim() || report.reporterEmail?.trim()
   if (email) return email
   return report.reporterUserId
 }
@@ -147,10 +168,48 @@ export function reporterHref(report: ReportRow): string | null {
 }
 
 export function taskTitle(report: ReportRow): string {
-  const title = report.targetTitle?.trim()
+  const title = report.targetLabel?.trim()
   if (title) return title
   if (report.targetType === 'TASK') return `Task ${report.targetId}`
   return `${report.targetType} ${report.targetId}`
+}
+
+export function reportFromApi(row: ReportApiPayload): ReportRow {
+  const targetLabel =
+    row.targetLabel?.trim() || row.targetTitle?.trim() || null
+  const reporterEmail =
+    row.reporterEmail?.trim() || row.reporter?.email?.trim() || null
+  return {
+    id: row.id,
+    targetId: row.targetId,
+    targetType: row.targetType,
+    reason: row.reason,
+    details: row.details,
+    status: row.status,
+    targetUrl: row.targetUrl,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    reporterUserId: row.reporterUserId,
+    targetLabel,
+    reporterEmail,
+    reporter: row.reporter ?? null,
+  }
+}
+
+/** Status mutations often return core fields only; keep list enrichment. */
+export function mergeReportRow(
+  current: ReportRow,
+  updated: ReportRow,
+): ReportRow {
+  return {
+    ...current,
+    ...updated,
+    targetLabel: updated.targetLabel || current.targetLabel,
+    reporterEmail: updated.reporterEmail || current.reporterEmail,
+    reporter: updated.reporter || current.reporter,
+    details: updated.details ?? current.details,
+    targetUrl: updated.targetUrl ?? current.targetUrl,
+  }
 }
 
 export function reportsPath(input: {

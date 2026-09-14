@@ -23,7 +23,7 @@ export type Scalars = {
    *   adminWorkers(search: String, id: ID, first: Int): [worker!]!
    *   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
    *   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
-   *   adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 100, after: String): ReportPage!
+   *   adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!
    *   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
    *   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
    *   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
@@ -419,7 +419,8 @@ export enum QuoteStatus {
 }
 
 /**
- * Trust-and-safety report. BE-46 enriches `reporter` and `targetTitle` for ops.
+ * Trust-and-safety report. BE-46 enriches `reporter`, `reporterEmail`, and
+ * `targetLabel` for ops (task title when targetType is TASK).
  * BE-40 payloads always include reporterUserId + target fields.
  */
 export type Report = {
@@ -428,11 +429,12 @@ export type Report = {
   id: Scalars['ID']['output'];
   reason: ReportReason;
   reporter?: Maybe<User>;
+  reporterEmail?: Maybe<Scalars['String']['output']>;
   reporterUserId: Scalars['ID']['output'];
   status: ReportStatus;
   targetId: Scalars['ID']['output'];
-  /** Linked task title when targetType is TASK (BE-46). */
-  targetTitle?: Maybe<Scalars['String']['output']>;
+  /** Linked task title (or worker/user label) when BE-46 enrichment is present. */
+  targetLabel?: Maybe<Scalars['String']['output']>;
   targetType: ReportTargetType;
   targetUrl?: Maybe<Scalars['String']['output']>;
   updatedAt: Scalars['DateTime']['output'];
@@ -754,7 +756,7 @@ export type AdminSetUserDisabledMutationVariables = Exact<{
 
 export type AdminSetUserDisabledMutation = { adminSetUserDisabled: { id: string, email: string, emailVerified: boolean, phoneVerified?: boolean | null, createdAt?: any | null, disabled: boolean, profile?: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null, bio?: string | null } | null, worker?: { id: string, userId?: string | null, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification?: IdentityVerificationStatus | null, skills?: Array<string> | null, phoneVerified?: boolean | null, emailVerified?: boolean | null, memberSince?: any | null, serviceAreaLabel?: string | null, profile?: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null } | null, ratingSummary?: { average?: number | null, count: number } | null } | null } };
 
-export type ReportFieldsFragment = { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, targetTitle?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null };
+export type ReportFieldsFragment = { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, reporterEmail?: string | null, targetLabel?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null };
 
 export type ReportCoreFieldsFragment = { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string };
 
@@ -766,7 +768,7 @@ export type AdminReportsQueryVariables = Exact<{
 }>;
 
 
-export type AdminReportsQuery = { adminReports: { nextCursor?: string | null, items: Array<{ id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, targetTitle?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null }> } };
+export type AdminReportsQuery = { adminReports: { nextCursor?: string | null, items: Array<{ id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, reporterEmail?: string | null, targetLabel?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null }> } };
 
 export type AdminReportsCoreQueryVariables = Exact<{
   status?: InputMaybe<ReportStatus>;
@@ -793,7 +795,7 @@ export type AdminUpdateReportStatusMutationVariables = Exact<{
 }>;
 
 
-export type AdminUpdateReportStatusMutation = { adminUpdateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string } };
+export type AdminUpdateReportStatusMutation = { adminUpdateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, reporterEmail?: string | null, targetLabel?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null } };
 
 export type UpdateReportStatusMutationVariables = Exact<{
   id: Scalars['ID']['input'];

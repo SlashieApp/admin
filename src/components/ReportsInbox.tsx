@@ -11,6 +11,7 @@ import {
   updateAdminReportStatus,
 } from '@/lib/reportInbox'
 import {
+  mergeReportRow,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
   reporterHref,
@@ -90,7 +91,9 @@ function ReportsPanel({
     try {
       const updated = await updateAdminReportStatus(id, next)
       setRows((current) =>
-        current.map((row) => (row.id === id ? { ...row, ...updated } : row)),
+        current.map((row) =>
+          row.id === id ? mergeReportRow(row, updated) : row,
+        ),
       )
     } catch (err) {
       setUpdateError(graphqlErrorMessage(err))
