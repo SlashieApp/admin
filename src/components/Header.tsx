@@ -1,20 +1,30 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname, useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 
 import { useAuth } from '@/lib/auth'
+import { parseAdminHomeMode } from '@/lib/search'
 
 export function Header() {
   const { user, logout } = useAuth()
 
   return (
     <header className="header">
-      <Link href="/" className="brand">
-        <span className="brand-mark" aria-hidden>
-          S
-        </span>
-        Slashie Admin
-      </Link>
+      <div className="header-left">
+        <Link href="/" className="brand">
+          <span className="brand-mark" aria-hidden>
+            S
+          </span>
+          Slashie Admin
+        </Link>
+        {user ? (
+          <Suspense fallback={<HeaderNavFallback />}>
+            <HeaderNav />
+          </Suspense>
+        ) : null}
+      </div>
       <div className="header-meta">
         {user ? (
           <>
@@ -26,5 +36,52 @@ export function Header() {
         ) : null}
       </div>
     </header>
+  )
+}
+
+function HeaderNavFallback() {
+  return (
+    <nav className="header-nav" aria-label="Admin sections">
+      <Link href="/dashboard" className="tab">
+        Dashboard
+      </Link>
+      <Link href="/" className="tab">
+        Tasks
+      </Link>
+      <Link href="/?mode=users" className="tab">
+        Users
+      </Link>
+    </nav>
+  )
+}
+
+function HeaderNav() {
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const homeMode = parseAdminHomeMode(params.get('mode'))
+  const dashboardActive = pathname.startsWith('/dashboard')
+  const usersActive =
+    pathname.startsWith('/users') ||
+    (pathname === '/' && homeMode === 'users')
+  const tasksActive = !dashboardActive && !usersActive
+
+  return (
+    <nav className="header-nav" aria-label="Admin sections">
+      <Link
+        href="/dashboard"
+        className={dashboardActive ? 'tab is-active' : 'tab'}
+      >
+        Dashboard
+      </Link>
+      <Link href="/" className={tasksActive ? 'tab is-active' : 'tab'}>
+        Tasks
+      </Link>
+      <Link
+        href="/?mode=users"
+        className={usersActive ? 'tab is-active' : 'tab'}
+      >
+        Users
+      </Link>
+    </nav>
   )
 }

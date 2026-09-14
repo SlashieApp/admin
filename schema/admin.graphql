@@ -1,0 +1,457 @@
+"""
+Slashie admin GraphQL contract.
+
+Marketplace types match live apollo introspection (2026-09-14) plus BE-43
+admin expansions. `@admin` fields:
+
+  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
+  adminTask(id: ID!): AdminTaskDossier!
+  adminWorkers(search: String, id: ID, first: Int): [worker!]!
+  adminUsers(search: String, id: ID, first: Int = 50): [User!]!
+  adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
+  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
+  adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
+  adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
+
+Legacy BE-42 `adminTasks(search, id)` args are kept so the panel can fall
+back if an environment has not switched to `filter`.
+
+See https://linear.app/slashie/issue/BE-42
+See https://linear.app/slashie/issue/BE-43
+"""
+
+scalar DateTime
+scalar JSON
+
+enum LoginMethod {
+  PASSWORD
+  GOOGLE
+  APPLE
+}
+
+enum Currency {
+  USD
+  GBP
+}
+
+enum TaskStatus {
+  DRAFT
+  OPEN
+  AWARDED
+  QUOTE_ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  CONFIRMED
+}
+
+enum TaskBudgetType {
+  ONE_OFF
+  PER_DAY
+  PER_HOUR
+}
+
+enum TaskPaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+enum TaskDateTimeType {
+  BEFORE
+  FLEXIBLE
+  EXACT
+}
+
+enum TaskContactMethod {
+  PHONE
+  EMAIL
+  IN_APP
+}
+
+enum WorkerPrimaryCategory {
+  HANDYMAN
+  FURNITURE_ASSEMBLY
+  MOUNTING_INSTALLATION
+  PLUMBING
+  ELECTRICAL
+  CARPENTRY
+  PAINTING
+  CLEANING
+  GARDENING
+  REMOVALS
+  DELIVERY_ERRANDS
+  OTHER
+}
+
+enum IdentityVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+}
+
+enum QuoteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  REJECTED
+}
+
+enum OrderStatus {
+  ACTIVE
+  WORK_COMPLETED
+  PAYMENT_ACKNOWLEDGED
+  CLOSED
+  CANCELLED
+}
+
+enum NotificationType {
+  QUOTE_RECEIVED
+  QUOTE_ACCEPTED
+  QUOTE_DECLINED
+  TASK_COMPLETED
+  TASK_CONFIRMED
+  ORDER_WORK_COMPLETED
+  ORDER_CLOSED
+}
+
+enum TaskTimelineEventType {
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_CANCELLED
+  TASK_COMPLETED
+  TASK_CONFIRMED
+  TASK_PAID
+}
+
+type Profile {
+  name: String
+  contactNumber: String
+  avatarUrl: String
+  bio: String
+  emailVerified: Boolean
+  phoneVerified: Boolean
+}
+
+type User {
+  id: ID!
+  email: String!
+  emailVerified: Boolean!
+  phoneVerified: Boolean
+  createdAt: DateTime
+  enabledLoginMethods: [LoginMethod!]
+  profile: Profile
+  worker: worker
+  disabled: Boolean!
+  tasksPosted: [Task!]
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+input LoginInput {
+  method: LoginMethod!
+  email: String
+  password: String
+  oauthToken: String
+  captchaToken: String
+}
+
+type TaskBudget {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+input TaskBudgetInput {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+type TaskLocation {
+  lat: Float
+  lng: Float
+  name: String
+  address: String
+}
+
+input TaskLocationInput {
+  lat: Float!
+  lng: Float!
+  name: String!
+  address: String!
+}
+
+type Location {
+  address: String
+  lat: Float
+  lng: Float
+  name: String
+}
+
+type TaskDateTime {
+  date: String
+  time: String
+  type: TaskDateTimeType!
+}
+
+type Price {
+  amount: Float!
+  currency: Currency!
+}
+
+type OrderAgreedPrice {
+  amount: Float!
+  currency: Currency!
+}
+
+type Quote {
+  id: ID!
+  taskId: ID
+  workerUserId: ID
+  status: QuoteStatus!
+  message: String
+  estimatedDuration: String
+  createdAt: DateTime
+  price: Price
+  """Live marketplace names this field `worker` but the type is User."""
+  worker: User
+  task: Task
+}
+
+type Order {
+  id: ID!
+  taskId: ID
+  quoteId: ID
+  customerUserId: ID
+  workerUserId: ID
+  status: OrderStatus!
+  createdAt: DateTime
+  workCompletedAt: DateTime
+  closedAt: DateTime
+  agreedPrice: OrderAgreedPrice
+  task: Task
+}
+
+type Notification {
+  id: ID!
+  type: NotificationType!
+  title: String!
+  body: String!
+  createdAt: DateTime
+  recipientUserId: ID
+  actorUserId: ID
+  taskId: ID
+  quoteId: ID
+  orderId: ID
+  actor: User
+  recipient: User
+}
+
+type TaskTimelineEvent {
+  type: TaskTimelineEventType!
+  timestamp: DateTime!
+  actor: User!
+  data: JSON
+}
+
+type Task {
+  id: ID!
+  title: String!
+  description: String!
+  category: String!
+  status: TaskStatus!
+  views: Int
+  budget: TaskBudget
+  location: TaskLocation!
+  poster: User
+  datetime: TaskDateTime
+  images: [String!]
+  quotes: [Quote!]
+  orders: [Order!]
+  timeline: [TaskTimelineEvent!]
+  """BE-42 god-mode visibility. Absent on pre-admin marketplace selections."""
+  hidden: Boolean
+}
+
+enum AdminTaskActivitySource {
+  NOTIFICATION
+  TIMELINE
+}
+
+type AdminTaskActivity {
+  source: AdminTaskActivitySource!
+  type: String!
+  title: String
+  body: String
+  actorUserId: ID
+  recipientUserId: ID
+  quoteId: ID
+  orderId: ID
+  createdAt: DateTime!
+}
+
+type AdminTaskDossier {
+  task: Task!
+  poster: User
+  workers: [worker!]!
+  quotes: [Quote!]!
+  orders: [Order!]!
+  activity: [AdminTaskActivity!]!
+}
+
+type WorkerRatingSummary {
+  average: Float
+  count: Int!
+}
+
+type ServiceArea {
+  radiusMiles: Float
+  label: String
+}
+
+"""Live apollo names this object `worker` (lowercase)."""
+type worker {
+  id: ID!
+  userId: ID
+  legalName: String
+  bio: String
+  tagline: String
+  primaryCategory: WorkerPrimaryCategory
+  yearsExperience: Int
+  isVerified: Boolean!
+  identityVerification: IdentityVerificationStatus
+  skills: [String!]
+  qualifications: [String!]
+  tasksCompletedCount: Int
+  quotesSentCount: Int
+  phoneVerified: Boolean
+  emailVerified: Boolean
+  memberSince: DateTime
+  serviceAreaLabel: String
+  averageResponseTime: String
+  profile: Profile
+  user: User
+  preferredLocation: Location
+  serviceArea: ServiceArea
+  ratingSummary: WorkerRatingSummary
+}
+
+input TaskFilter {
+  search: String
+  category: String
+  status: [TaskStatus!]
+}
+
+input WorkerFilter {
+  search: String
+}
+
+input AdminTaskFilter {
+  search: String
+  id: ID
+  status: [TaskStatus!]
+  hidden: Boolean
+}
+
+input AdminUpdateTaskInput {
+  title: String
+  description: String
+  status: TaskStatus
+  category: String
+  location: TaskLocationInput
+  budget: TaskBudgetInput
+  hidden: Boolean
+}
+
+input AdminUpdateUserInput {
+  name: String
+  contactNumber: String
+  emailVerified: Boolean
+  phoneVerified: Boolean
+}
+
+enum AdminOpsRange {
+  LAST_7_DAYS
+  LAST_30_DAYS
+  THIS_MONTH
+  LAST_MONTH
+}
+
+type AdminOpsMetric {
+  current: Int!
+  previous: Int!
+  percentChange: Float
+}
+
+type AdminTaskStatusCount {
+  status: TaskStatus!
+  count: Int!
+}
+
+"""BE-44 Mongo-authoritative ops KPIs for the admin dashboard."""
+type AdminOpsSummary {
+  range: AdminOpsRange!
+  dateFrom: DateTime!
+  dateTo: DateTime!
+  previousDateFrom: DateTime!
+  previousDateTo: DateTime!
+  newUsers: AdminOpsMetric!
+  tasksCreated: AdminOpsMetric!
+  workersRegistered: AdminOpsMetric!
+  quotesSent: AdminOpsMetric!
+  quotesAccepted: AdminOpsMetric!
+  quotesDeclined: AdminOpsMetric!
+  ordersOpened: AdminOpsMetric!
+  jobsCompleted: AdminOpsMetric!
+  jobsConfirmed: AdminOpsMetric!
+  reportsSubmitted: AdminOpsMetric!
+  openReports: Int!
+  hiddenTasks: Int!
+  disabledUsers: Int!
+  tasksByStatus: [AdminTaskStatusCount!]!
+}
+
+type Query {
+  me: User!
+  task(id: ID!): Task
+  tasks(filter: TaskFilter): [Task!]!
+  worker(id: ID!): worker
+  workers(filter: WorkerFilter): [worker!]!
+  order(id: ID, taskId: ID): Order
+  """BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page."""
+  adminTasks(
+    filter: AdminTaskFilter
+    first: Int = 50
+    """Legacy BE-42 args kept for fallback queries."""
+    search: String
+    id: ID
+  ): [Task!]!
+  """BE-43 @admin — full related records for one task."""
+  adminTask(id: ID!): AdminTaskDossier!
+  """BE-42 @admin — search workers by text and/or id."""
+  adminWorkers(search: String, id: ID, first: Int = 50): [worker!]!
+  """BE-43 @admin — search users by email, name, and/or id."""
+  adminUsers(search: String, id: ID, first: Int = 50): [User!]!
+  """BE-44 @admin — Mongo-authoritative ops KPIs."""
+  adminOpsSummary(
+    range: AdminOpsRange!
+    dateFrom: DateTime
+    dateTo: DateTime
+  ): AdminOpsSummary!
+}
+
+type Mutation {
+  loginWithMethod(input: LoginInput!): AuthPayload!
+  """BE-42 @admin — god-mode task update (ignores owner checks)."""
+  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
+  """BE-43 @admin — ops profile / verification updates."""
+  adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
+  """BE-43 @admin — disable or re-enable a user if the API ships it."""
+  adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
+}

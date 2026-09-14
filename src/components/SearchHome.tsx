@@ -1,60 +1,96 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 
 import {
   AdminTasks,
-  AdminWorkers,
+  AdminTasksLegacy,
+  AdminUsers,
   Tasks,
-  Workers,
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import {
   graphqlErrorMessage,
   isMissingAdminFieldError,
 } from '@/lib/graphqlErrors'
-import { toAdminSearchVariables, toAdminTaskVariables } from '@/lib/search'
+import {
+  parseAdminHomeMode,
+  toAdminSearchVariables,
+  toAdminTaskListVariables,
+  toAdminUserListVariables,
+} from '@/lib/search'
+import { displayName } from '@/lib/dossier'
+import { isWorkerUser } from '@/lib/userInput'
 import type {
+  AdminTasksLegacyQuery,
   AdminTasksQuery,
-  AdminWorkersQuery,
+  AdminUsersQuery,
   TasksQuery,
-  WorkersQuery,
 } from '@codegen/schema'
 
-type Mode = 'tasks' | 'workers'
-
-type TaskHit = NonNullable<AdminTasksQuery['adminTasks']>[number]
-type WorkerHit = NonNullable<AdminWorkersQuery['adminWorkers']>[number]
+type TaskHit = AdminTasksQuery['adminTasks'][number]
+type UserHit = AdminUsersQuery['adminUsers'][number]
 
 export function SearchHome() {
-  const [mode, setMode] = useState<Mode>('tasks')
-  const [q, setQ] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [usedFallback, setUsedFallback] = useState(false)
-  const [tasks, setTasks] = useState<TaskHit[]>([])
-  const [workers, setWorkers] = useState<WorkerHit[]>([])
+  const searchParams = useSearchParams()
+  const mode = parseAdminHomeMode(searchParams.get('mode'))
+  return <SearchPanel key={mode} mode={mode} />
+}
 
-  async function runSearch(event: React.FormEvent) {
-    event.preventDefault()
-    const query = q.trim()
-    if (!query) return
+function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [banner, setBanner] = useState<string | null>(null)
+  const [tasks, setTasks] = useState<TaskHit[]>([])
+  const [users, setUsers] = useState<UserHit[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    async function autoload() {
+      try {
+        if (mode === 'users') {
+          const hits = await listUsers('')
+          if (cancelled) return
+          setUsers(hits.rows)
+          setTasks([])
+          setBanner(hits.banner)
+        } else {
+          const hits = await listTasks('')
+          if (cancelled) return
+          setTasks(hits.rows)
+          setUsers([])
+          setBanner(hits.banner)
+        }
+      } catch (err) {
+        if (!cancelled) setError(graphqlErrorMessage(err))
+      } finally {
+        if (!cancelled) setBusy(false)
+      }
+    }
+    void autoload()
+    return () => {
+      cancelled = true
+    }
+  }, [mode])
+
+  async function load(raw: string) {
     setBusy(true)
     setError(null)
-    setUsedFallback(false)
-
+    setBanner(null)
     try {
-      if (mode === 'tasks') {
-        const hits = await searchTasks(query)
-        setTasks(hits.rows)
-        setUsedFallback(hits.fallback)
-        setWorkers([])
-      } else {
-        const hits = await searchWorkers(query)
-        setWorkers(hits.rows)
-        setUsedFallback(hits.fallback)
+      if (mode === 'users') {
+        const hits = await listUsers(raw)
+        setUsers(hits.rows)
         setTasks([])
+        setBanner(hits.banner)
+      } else {
+        const hits = await listTasks(raw)
+        setTasks(hits.rows)
+        setUsers([])
+        setBanner(hits.banner)
       }
     } catch (err) {
       setError(graphqlErrorMessage(err))
@@ -63,63 +99,90 @@ export function SearchHome() {
     }
   }
 
+  function onSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    void load(q)
+  }
+
+  function onQueryChange(value: string) {
+    const wasEmpty = q.trim() === ''
+    setQ(value)
+    if (!wasEmpty && value.trim() === '') void load('')
+  }
+
   return (
     <section className="stack">
       <div>
-        <h1>Search</h1>
+        <h1>{mode === 'users' ? 'Users' : 'Tasks'}</h1>
         <p className="muted">
-          Find marketplace tasks or workers by text or id, then open god-mode
-          edit for a task.
+          {mode === 'users'
+            ? 'Search marketplace users by email, name, or id. An empty search loads recent users.'
+            : 'Latest marketplace tasks load automatically. Search is an optional filter.'}
         </p>
       </div>
 
       <div className="tabs" role="tablist">
-        <button
-          type="button"
+        <Link
+          href="/"
           role="tab"
           aria-selected={mode === 'tasks'}
           className={mode === 'tasks' ? 'tab is-active' : 'tab'}
-          onClick={() => setMode('tasks')}
         >
           Tasks
-        </button>
-        <button
-          type="button"
+        </Link>
+        <Link
+          href="/?mode=users"
           role="tab"
-          aria-selected={mode === 'workers'}
-          className={mode === 'workers' ? 'tab is-active' : 'tab'}
-          onClick={() => setMode('workers')}
+          aria-selected={mode === 'users'}
+          className={mode === 'users' ? 'tab is-active' : 'tab'}
         >
-          Workers
-        </button>
+          Users
+        </Link>
       </div>
 
-      <form className="search-row" onSubmit={(e) => void runSearch(e)}>
+      <form className="search-row" onSubmit={onSubmit}>
         <input
           className="input"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => onQueryChange(e.target.value)}
           placeholder={
-            mode === 'tasks'
-              ? 'Task title, description, or id'
-              : 'Worker name, skill, or id'
+            mode === 'users'
+              ? 'Email, name, or user id'
+              : 'Task title, description, or id'
           }
-          aria-label={mode === 'tasks' ? 'Search tasks' : 'Search workers'}
+          aria-label={mode === 'users' ? 'Search users' : 'Search tasks'}
         />
         <button className="btn btn-primary" type="submit" disabled={busy}>
-          {busy ? 'Searching…' : 'Search'}
+          {busy ? 'Loading…' : 'Search'}
         </button>
       </form>
 
-      {usedFallback ? (
-        <p className="banner banner-warn">
-          BE-42 admin search is not on this Apollo yet. Showing public
-          marketplace search instead.
-        </p>
-      ) : null}
+      {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
-      {mode === 'tasks' ? (
+      {mode === 'users' ? (
+        <ul className="list">
+          {users.map((user) => (
+            <li key={user.id} className="card">
+              <Link href={`/users/${user.id}`} className="card-link">
+                <div className="card-top">
+                  <strong>{displayName(user)}</strong>
+                  {isWorkerUser(user) ? (
+                    <span className="pill pill-ok">worker</span>
+                  ) : (
+                    <span className="pill">not a worker</span>
+                  )}
+                </div>
+                <p className="muted">{user.email}</p>
+                <p className="meta">
+                  {user.emailVerified ? 'email verified' : 'email unverified'}
+                  {user.worker?.legalName ? ` · ${user.worker.legalName}` : ''}
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
         <ul className="list">
           {tasks.map((task) => (
             <li key={task.id} className="card">
@@ -138,76 +201,76 @@ export function SearchHome() {
             </li>
           ))}
         </ul>
-      ) : (
-        <ul className="list">
-          {workers.map((worker) => (
-            <li key={worker.id} className="card">
-              <Link href={`/workers/${worker.id}`} className="card-link">
-                <div className="card-top">
-                  <strong>
-                    {worker.profile?.name || worker.legalName || worker.id}
-                  </strong>
-                  {worker.isVerified ? (
-                    <span className="pill">verified</span>
-                  ) : null}
-                </div>
-                <p className="muted clamp">
-                  {worker.tagline || worker.bio || 'No tagline'}
-                </p>
-                <p className="meta">
-                  {worker.primaryCategory ?? 'uncategorised'}
-                  {worker.user?.email ? ` · ${worker.user.email}` : ''}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
       )}
+
+      {!busy && mode === 'tasks' && tasks.length === 0 ? (
+        <p className="muted">No tasks found.</p>
+      ) : null}
+      {!busy && mode === 'users' && users.length === 0 && !error ? (
+        <p className="muted">No users found.</p>
+      ) : null}
     </section>
   )
 }
 
-async function searchTasks(query: string): Promise<{
+async function listTasks(query: string): Promise<{
   rows: TaskHit[]
-  fallback: boolean
+  banner: string | null
 }> {
+  const vars = toAdminTaskListVariables(query)
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
-      variables: toAdminTaskVariables(query),
-      fetchPolicy: 'network-only',
-    })
-    return { rows: result.data?.adminTasks ?? [], fallback: false }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-    const result = await apolloClient.query<TasksQuery>({
-      query: Tasks,
-      variables: { filter: { search: query } },
-      fetchPolicy: 'network-only',
-    })
-    return { rows: result.data?.tasks ?? [], fallback: true }
-  }
-}
-
-async function searchWorkers(query: string): Promise<{
-  rows: WorkerHit[]
-  fallback: boolean
-}> {
-  const vars = toAdminSearchVariables(query)
-  try {
-    const result = await apolloClient.query<AdminWorkersQuery>({
-      query: AdminWorkers,
       variables: vars,
       fetchPolicy: 'network-only',
     })
-    return { rows: result.data?.adminWorkers ?? [], fallback: false }
+    return { rows: result.data?.adminTasks ?? [], banner: null }
   } catch (error) {
     if (!isMissingAdminFieldError(error)) throw error
-    const result = await apolloClient.query<WorkersQuery>({
-      query: Workers,
-      variables: { filter: { search: query } },
+  }
+
+  try {
+    const result = await apolloClient.query<AdminTasksLegacyQuery>({
+      query: AdminTasksLegacy,
+      variables: toAdminSearchVariables(query),
       fetchPolicy: 'network-only',
     })
-    return { rows: result.data?.workers ?? [], fallback: true }
+    return {
+      rows: result.data?.adminTasks ?? [],
+      banner:
+        'This Apollo still uses legacy adminTasks(search, id). Showing that list.',
+    }
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  const result = await apolloClient.query<TasksQuery>({
+    query: Tasks,
+    variables: query.trim() ? { filter: { search: query.trim() } } : {},
+    fetchPolicy: 'network-only',
+  })
+  return {
+    rows: result.data?.tasks ?? [],
+    banner:
+      'BE-42 adminTasks is not on this Apollo yet. Showing public marketplace tasks instead.',
+  }
+}
+
+async function listUsers(query: string): Promise<{
+  rows: UserHit[]
+  banner: string | null
+}> {
+  try {
+    const result = await apolloClient.query<AdminUsersQuery>({
+      query: AdminUsers,
+      variables: toAdminUserListVariables(query),
+      fetchPolicy: 'network-only',
+    })
+    return { rows: result.data?.adminUsers ?? [], banner: null }
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+    throw new Error(
+      'adminUsers is not on this Apollo yet (BE-43). Point NEXT_PUBLIC_GRAPHQL_URL at an API that has the @admin user search.',
+    )
   }
 }
