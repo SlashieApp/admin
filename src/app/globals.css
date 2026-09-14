@@ -236,6 +236,7 @@ h3,
 .header .btn-ghost {
   color: var(--header-text);
   border-color: rgba(255, 255, 255, 0.18);
+  background: transparent;
 }
 
 .main,
