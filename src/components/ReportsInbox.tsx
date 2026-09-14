@@ -122,8 +122,8 @@ function ReportsInboxPanel({
     setActionError(null)
     try {
       const updated = await updateAdminReportStatus(id, next)
-      setItems((current) =>
-        current.map((row) =>
+      setItems((current) => {
+        const mapped = current.map((row) =>
           row.id === id
             ? {
                 ...row,
@@ -132,8 +132,13 @@ function ReportsInboxPanel({
                 reporter: updated.reporter || row.reporter,
               }
             : row,
-        ),
-      )
+        )
+        const visible =
+          status === 'ALL'
+            ? mapped
+            : mapped.filter((row) => row.status === status)
+        return status === 'ALL' ? sortReportsOpenFirst(visible) : visible
+      })
     } catch (err) {
       setActionError(graphqlErrorMessage(err))
     } finally {
