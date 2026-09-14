@@ -1,0 +1,222 @@
+"""
+Slashie admin GraphQL contract.
+
+Marketplace types match live apollo introspection (2026-09-14).
+`@admin` fields are the BE-42 proposed API used by this panel:
+
+  adminTasks(search: String, id: ID): [Task!]!
+  adminWorkers(search: String, id: ID): [worker!]!
+  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
+
+See https://linear.app/slashie/issue/BE-42
+"""
+
+scalar DateTime
+
+enum LoginMethod {
+  PASSWORD
+  GOOGLE
+  APPLE
+}
+
+enum Currency {
+  USD
+  GBP
+}
+
+enum TaskStatus {
+  DRAFT
+  OPEN
+  AWARDED
+  QUOTE_ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  CONFIRMED
+}
+
+enum TaskBudgetType {
+  ONE_OFF
+  PER_DAY
+  PER_HOUR
+}
+
+enum TaskPaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+enum WorkerPrimaryCategory {
+  HANDYMAN
+  FURNITURE_ASSEMBLY
+  MOUNTING_INSTALLATION
+  PLUMBING
+  ELECTRICAL
+  CARPENTRY
+  PAINTING
+  CLEANING
+  GARDENING
+  REMOVALS
+  DELIVERY_ERRANDS
+  OTHER
+}
+
+enum IdentityVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+}
+
+type Profile {
+  name: String
+  contactNumber: String
+  avatarUrl: String
+  bio: String
+}
+
+type User {
+  id: ID!
+  email: String!
+  emailVerified: Boolean!
+  createdAt: DateTime
+  enabledLoginMethods: [LoginMethod!]
+  profile: Profile
+  worker: worker
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+input LoginInput {
+  method: LoginMethod!
+  email: String
+  password: String
+  oauthToken: String
+  captchaToken: String
+}
+
+type TaskBudget {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+input TaskBudgetInput {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+type TaskLocation {
+  lat: Float
+  lng: Float
+  name: String
+  address: String
+}
+
+input TaskLocationInput {
+  lat: Float!
+  lng: Float!
+  name: String!
+  address: String!
+}
+
+type Location {
+  address: String
+  lat: Float
+  lng: Float
+  name: String
+}
+
+type Task {
+  id: ID!
+  title: String!
+  description: String!
+  category: String!
+  status: TaskStatus!
+  views: Int
+  budget: TaskBudget
+  location: TaskLocation!
+  poster: User
+  """BE-42 god-mode visibility. Absent on pre-admin marketplace selections."""
+  hidden: Boolean
+}
+
+type WorkerRatingSummary {
+  average: Float
+  count: Int!
+}
+
+type ServiceArea {
+  radiusMiles: Float
+  label: String
+}
+
+"""Live apollo names this object `worker` (lowercase)."""
+type worker {
+  id: ID!
+  userId: ID
+  legalName: String
+  bio: String
+  tagline: String
+  primaryCategory: WorkerPrimaryCategory
+  yearsExperience: Int
+  isVerified: Boolean!
+  identityVerification: IdentityVerificationStatus
+  skills: [String!]
+  qualifications: [String!]
+  tasksCompletedCount: Int
+  quotesSentCount: Int
+  phoneVerified: Boolean
+  emailVerified: Boolean
+  memberSince: DateTime
+  serviceAreaLabel: String
+  averageResponseTime: String
+  profile: Profile
+  user: User
+  preferredLocation: Location
+  serviceArea: ServiceArea
+  ratingSummary: WorkerRatingSummary
+}
+
+input TaskFilter {
+  search: String
+  category: String
+  status: [TaskStatus!]
+}
+
+input WorkerFilter {
+  search: String
+}
+
+input AdminUpdateTaskInput {
+  title: String
+  description: String
+  status: TaskStatus
+  category: String
+  location: TaskLocationInput
+  budget: TaskBudgetInput
+  hidden: Boolean
+}
+
+type Query {
+  me: User!
+  task(id: ID!): Task
+  tasks(filter: TaskFilter): [Task!]!
+  worker(id: ID!): worker
+  workers(filter: WorkerFilter): [worker!]!
+  """BE-42 @admin — search tasks by text and/or id."""
+  adminTasks(search: String, id: ID): [Task!]!
+  """BE-42 @admin — search workers by text and/or id."""
+  adminWorkers(search: String, id: ID): [worker!]!
+}
+
+type Mutation {
+  loginWithMethod(input: LoginInput!): AuthPayload!
+  """BE-42 @admin — god-mode task update (ignores owner checks)."""
+  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
+}
