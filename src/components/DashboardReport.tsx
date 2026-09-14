@@ -96,7 +96,11 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
           <dl className="kv">
             <div>
               <dt>Open reports</dt>
-              <dd>{ops.openReports ?? '—'}</dd>
+              <dd>
+                <Link href="/reports?status=OPEN" className="inline-link">
+                  {ops.openReports ?? '—'}
+                </Link>
+              </dd>
             </div>
             <div>
               <dt>Hidden tasks</dt>

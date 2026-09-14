@@ -436,9 +436,38 @@ select.input {
   background: var(--bg-muted);
 }
 
-.pill-ok {
-  color: var(--brand-ink);
-  background: var(--brand);
+.pill-warn {
+  color: var(--warn);
+  background: #f8edd4;
+}
+
+.filter-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.report-card p {
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.report-kv {
+  margin: 0;
 }
 
 .inline-link {
