@@ -141,17 +141,21 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
       </div>
 
       <form className="search-row" onSubmit={onSubmit}>
-        <input
-          className="input"
-          value={q}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder={
-            mode === 'users'
-              ? 'Email, name, or user id'
-              : 'Task title, description, or id'
-          }
-          aria-label={mode === 'users' ? 'Search users' : 'Search tasks'}
-        />
+        <label className="field">
+          {mode === 'users' ? 'Search users' : 'Search tasks'}
+          <input
+            className="input"
+            value={q}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder={
+              mode === 'users'
+                ? 'Email, name, or user id'
+                : 'Task title, description, or id'
+            }
+            type="search"
+            autoComplete="off"
+          />
+        </label>
         <button className="btn btn-primary" type="submit" disabled={busy}>
           {busy ? 'Loading…' : 'Search'}
         </button>

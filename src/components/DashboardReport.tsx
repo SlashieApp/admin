@@ -1,11 +1,18 @@
 import Link from 'next/link'
 
 import type { AdminOpsSummaryQuery } from '@codegen/schema'
+import { DashboardCharts } from '@/components/DashboardCharts'
 import {
   ADMIN_OPS_RANGES,
   formatChangePct,
   type AdminOpsRange,
 } from '@/lib/opsRange'
+import {
+  toComparisonBars,
+  toCoreKpis,
+  toDauSeries,
+  toStatusBars,
+} from '@/lib/dashboardCharts'
 import {
   isIncompleteSuccessCapture,
   productEventLabel,
@@ -26,9 +33,14 @@ type Props = {
 }
 
 export function DashboardReport({ range, ops, opsBanner, product }: Props) {
+  const kpis = toCoreKpis(ops)
+  const comparison = toComparisonBars(kpis)
+  const status = toStatusBars(ops?.tasksByStatus)
+  const dau = toDauSeries(product.dau)
+
   return (
     <section className="stack">
-      <div>
+      <div className="page-intro">
         <h1>Dashboard</h1>
         <p className="muted">
           Weekly / monthly ops report. Mongo counts are source of truth when
@@ -43,6 +55,7 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
             key={row.value}
             href={`/dashboard?range=${row.value}`}
             className={range === row.value ? 'tab is-active' : 'tab'}
+            aria-current={range === row.value ? 'page' : undefined}
           >
             {row.label}
           </Link>
@@ -51,16 +64,23 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
 
       {opsBanner ? <p className="banner banner-warn">{opsBanner}</p> : null}
 
-      <h2 className="section-heading">Hard counts (Mongo / Apollo)</h2>
+      <h2 className="section-heading">Key metrics</h2>
+      <DashboardCharts
+        kpis={kpis}
+        comparison={comparison}
+        status={status}
+        dau={dau}
+        emptyReason={
+          ops
+            ? null
+            : 'Charts use Mongo ops totals when available. Status bars and PostHog DAU still render if those sources return data.'
+        }
+      />
+
       {ops ? (
         <>
+          <h2 className="section-heading">Other ops counts</h2>
           <div className="metrics">
-            <MetricCard label="New users" count={ops.newUsers} />
-            <MetricCard label="Tasks created" count={ops.tasksCreated} />
-            <MetricCard
-              label="Workers registered"
-              count={ops.workersRegistered}
-            />
             <OptionalCount label="Quotes sent" count={ops.quotesSent} />
             <OptionalCount label="Quotes accepted" count={ops.quotesAccepted} />
             <OptionalCount label="Quotes declined" count={ops.quotesDeclined} />
@@ -72,10 +92,15 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
               count={ops.reportsSubmitted}
             />
           </div>
+          <h2 className="section-heading">Marketplace snapshot</h2>
           <dl className="kv">
             <div>
               <dt>Open reports</dt>
-              <dd>{ops.openReports ?? '—'}</dd>
+              <dd>
+                <Link href="/reports?status=OPEN" className="inline-link">
+                  {ops.openReports ?? '—'}
+                </Link>
+              </dd>
             </div>
             <div>
               <dt>Hidden tasks</dt>
@@ -86,21 +111,6 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
               <dd>{ops.disabledUsers ?? '—'}</dd>
             </div>
           </dl>
-          {ops.tasksByStatus?.length ? (
-            <article className="section">
-              <h2>Tasks by status</h2>
-              <ul className="list">
-                {ops.tasksByStatus.map((row) => (
-                  <li key={row.status} className="card card-pad">
-                    <div className="card-top">
-                      <strong>{row.status}</strong>
-                      <span className="pill">{row.count}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </article>
-          ) : null}
         </>
       ) : (
         <p className="muted">No Mongo ops summary for this range.</p>
@@ -129,52 +139,33 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
         <p className="banner banner-error">{product.error}</p>
       ) : null}
       {product.configured && !product.error ? (
-        <>
-          <div className="metrics">
-            {product.totals.length === 0
-              ? DASHBOARD_EMPTY_EVENTS.map((event) => (
-                  <article key={event} className="metric">
-                    <p className="metric-label">
-                      {productEventLabel(event)}
-                      {isIncompleteSuccessCapture(event) ? (
-                        <span className="pill">FE-153</span>
-                      ) : null}
-                    </p>
-                    <p className="metric-value">0</p>
-                    <p className="meta">0 unique</p>
-                  </article>
-                ))
-              : product.totals.map((row) => (
-                  <article key={row.event} className="metric">
-                    <p className="metric-label">
-                      {productEventLabel(row.event)}
-                      {isIncompleteSuccessCapture(row.event) ? (
-                        <span className="pill">FE-153</span>
-                      ) : null}
-                    </p>
-                    <p className="metric-value">{row.count}</p>
-                    <p className="meta">{row.users} unique</p>
-                  </article>
-                ))}
-          </div>
-          <article className="section">
-            <h2>This week strip — $pageview DAU</h2>
-            {product.dau.length === 0 ? (
-              <p className="muted">No pageview users in this range.</p>
-            ) : (
-              <ul className="list">
-                {product.dau.map((row) => (
-                  <li key={row.day} className="card card-pad">
-                    <div className="card-top">
-                      <strong>{row.day}</strong>
-                      <span className="pill">{row.users} DAU</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </article>
-        </>
+        <div className="metrics">
+          {product.totals.length === 0
+            ? DASHBOARD_EMPTY_EVENTS.map((event) => (
+                <article key={event} className="metric">
+                  <p className="metric-label">
+                    {productEventLabel(event)}
+                    {isIncompleteSuccessCapture(event) ? (
+                      <span className="pill">FE-153</span>
+                    ) : null}
+                  </p>
+                  <p className="metric-value">0</p>
+                  <p className="meta">0 unique</p>
+                </article>
+              ))
+            : product.totals.map((row) => (
+                <article key={row.event} className="metric">
+                  <p className="metric-label">
+                    {productEventLabel(row.event)}
+                    {isIncompleteSuccessCapture(row.event) ? (
+                      <span className="pill">FE-153</span>
+                    ) : null}
+                  </p>
+                  <p className="metric-value">{row.count}</p>
+                  <p className="meta">{row.users} unique</p>
+                </article>
+              ))}
+        </div>
       ) : null}
     </section>
   )
@@ -207,12 +198,9 @@ function MetricCard({ label, count }: { label: string; count: OpsCount }) {
     <article className="metric">
       <p className="metric-label">{label}</p>
       <p className="metric-value">{count.current}</p>
-      <p
-        className={
-          up ? 'meta is-up' : down ? 'meta is-down' : 'meta'
-        }
-      >
+      <p className={up ? 'meta is-up' : down ? 'meta is-down' : 'meta'}>
         {delta}
+        {up ? ' up' : down ? ' down' : ''}
         {count.previous != null ? ` vs ${count.previous} prior` : ''}
       </p>
     </article>

@@ -16,9 +16,12 @@
     "@react-oauth/google": "^0.13.5",
     "graphql": "^16.12.0",
     "graphql-tag": "^2.12.6",
+    "lucide-react": "^1.46.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-is": "^19.3.0",
+    "recharts": "^3.10.1",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
