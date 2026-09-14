@@ -418,7 +418,8 @@ const REPORT_FIELDS = gql`
     createdAt
     updatedAt
     reporterUserId
-    targetTitle
+    reporterEmail
+    targetLabel
     reporter {
       id
       email
@@ -501,8 +502,17 @@ export const Reports = gql`
 `
 
 export const AdminUpdateReportStatus = gql`
-  ${REPORT_CORE_FIELDS}
+  ${REPORT_FIELDS}
   mutation AdminUpdateReportStatus($id: ID!, $status: ReportStatus!) {
+    adminUpdateReportStatus(id: $id, status: $status) {
+      ...ReportFields
+    }
+  }
+`
+
+export const AdminUpdateReportStatusCore = gql`
+  ${REPORT_CORE_FIELDS}
+  mutation AdminUpdateReportStatusCore($id: ID!, $status: ReportStatus!) {
     adminUpdateReportStatus(id: $id, status: $status) {
       ...ReportCoreFields
     }

@@ -38,14 +38,14 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 | `adminUpdateTask` | `(id: ID!, input: AdminUpdateTaskInput!): Task!` |
 | `adminUpdateUser` | `(id: ID!, input: AdminUpdateUserInput!): User!` |
 | `adminSetUserDisabled` | `(id: ID!, disabled: Boolean!): User!` |
-| `adminReports` | `(status: ReportStatus, targetType: ReportTargetType, first: Int = 100, after: String): ReportPage!` |
+| `adminReports` | `(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!` |
 | `adminUpdateReportStatus` | `(id: ID!, status: ReportStatus!): Report!` |
 
 `AdminTaskFilter`: `search`, `id`, `status`, `hidden`.
 
 `AdminOpsRange`: `LAST_7_DAYS` | `LAST_30_DAYS` | `THIS_MONTH` | `LAST_MONTH`. Empty/omitted `adminTasks` filter returns the latest page of tasks (default `first` 50). Same for `adminUsers` with empty search.
 
-Default inbox: omit `status`, pass `targetType: TASK`. The panel shows OPEN first. If BE-46 fields are missing, it falls back to BE-40 `reports` / `updateReportStatus` (env allowlist) with a banner.
+Default inbox: omit `status`, pass `targetType: TASK`. The panel shows OPEN first. Report cards use BE-46 `targetLabel` (task title) and `reporter` / `reporterEmail`. If BE-46 fields are missing, it falls back to BE-40 `reports` / `updateReportStatus` (env allowlist) with a banner.
 
 If BE-43/44 fields are not on the pointed-at API yet, the panel shows a banner and falls back where it can. User search/management and Mongo ops counts have no public fallback.
 

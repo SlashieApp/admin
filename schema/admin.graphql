@@ -9,7 +9,7 @@ admin expansions. `@admin` fields:
   adminWorkers(search: String, id: ID, first: Int): [worker!]!
   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
-  adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 100, after: String): ReportPage!
+  adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!
   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
@@ -448,7 +448,8 @@ enum ReportTargetType {
 }
 
 """
-Trust-and-safety report. BE-46 enriches `reporter` and `targetTitle` for ops.
+Trust-and-safety report. BE-46 enriches `reporter`, `reporterEmail`, and
+`targetLabel` for ops (task title when targetType is TASK).
 BE-40 payloads always include reporterUserId + target fields.
 """
 type Report {
@@ -459,12 +460,13 @@ type Report {
   details: String
   status: ReportStatus!
   targetUrl: String
+  """Linked task title (or worker/user label) when BE-46 enrichment is present."""
+  targetLabel: String
   createdAt: DateTime!
   updatedAt: DateTime!
   reporterUserId: ID!
+  reporterEmail: String
   reporter: User
-  """Linked task title when targetType is TASK (BE-46)."""
-  targetTitle: String
 }
 
 type ReportPage {
@@ -501,7 +503,7 @@ type Query {
   adminReports(
     status: ReportStatus
     targetType: ReportTargetType
-    first: Int = 100
+    first: Int = 50
     after: String
   ): ReportPage!
   """

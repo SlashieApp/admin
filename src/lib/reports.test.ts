@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   filterReportsByTargetType,
+  mergeReportRow,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
   reporterHref,
   reporterLabel,
+  reportFromApi,
   reportsPath,
   reportTargetHref,
   sortReportsOpenFirst,
@@ -146,19 +148,82 @@ describe('report links and labels', () => {
         }),
       ),
     ).toBe('sam@x.com')
+    expect(
+      reporterLabel(
+        report({
+          id: '4',
+          reporterUserId: 'u5',
+          reporterEmail: 'lee@x.com',
+        }),
+      ),
+    ).toBe('lee@x.com')
     expect(reporterLabel(report({ id: '3', reporterUserId: 'u4' }))).toBe('u4')
     expect(reporterHref(report({ id: '3', reporterUserId: 'u4' }))).toBe(
       '/users/u4',
     )
   })
 
-  it('uses targetTitle when present', () => {
+  it('uses BE-46 targetLabel when present', () => {
     expect(
       taskTitle(
-        report({ id: '1', targetType: 'TASK', targetTitle: 'Leaky tap' }),
+        report({ id: '1', targetType: 'TASK', targetLabel: 'Leaky tap' }),
       ),
     ).toBe('Leaky tap')
     expect(taskTitle(report({ id: '2', targetId: 'zzz' }))).toBe('Task zzz')
+  })
+})
+
+describe('reportFromApi', () => {
+  it('maps live targetLabel and reporterEmail onto the inbox row', () => {
+    const row = reportFromApi({
+      id: 'r1',
+      targetId: 't9',
+      targetType: 'TASK',
+      reason: 'SPAM',
+      status: 'OPEN',
+      createdAt: '2026-09-14T12:00:00.000Z',
+      reporterUserId: 'u1',
+      targetLabel: 'Garden fence',
+      reporterEmail: 'pat@x.com',
+    })
+    expect(row.targetLabel).toBe('Garden fence')
+    expect(row.reporterEmail).toBe('pat@x.com')
+    expect(taskTitle(row)).toBe('Garden fence')
+    expect(reporterLabel(row)).toBe('pat@x.com')
+  })
+
+  it('maps the pre-BE-46 targetTitle alias onto targetLabel', () => {
+    const row = reportFromApi({
+      id: 'r2',
+      targetId: 't2',
+      targetType: 'TASK',
+      reason: 'SCAM',
+      status: 'OPEN',
+      createdAt: '2026-09-14T12:00:00.000Z',
+      reporterUserId: 'u1',
+      targetTitle: 'Old title field',
+    })
+    expect(row.targetLabel).toBe('Old title field')
+    expect(taskTitle(row)).toBe('Old title field')
+  })
+})
+
+describe('mergeReportRow', () => {
+  it('keeps task title and reporter after a core status update', () => {
+    const current = report({
+      id: 'r1',
+      targetLabel: 'Leaky tap',
+      reporterEmail: 'sam@x.com',
+      reporter: { id: 'u3', email: 'sam@x.com', profile: { name: 'Sam' } },
+    })
+    const merged = mergeReportRow(
+      current,
+      report({ id: 'r1', status: 'REVIEWED' }),
+    )
+    expect(merged.status).toBe('REVIEWED')
+    expect(merged.targetLabel).toBe('Leaky tap')
+    expect(merged.reporterEmail).toBe('sam@x.com')
+    expect(merged.reporter?.profile?.name).toBe('Sam')
   })
 })
 

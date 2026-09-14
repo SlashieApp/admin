@@ -3,6 +3,7 @@ import {
   AdminReportsCore,
   AdminTasks,
   AdminUpdateReportStatus,
+  AdminUpdateReportStatusCore,
   AdminUsers,
   Reports,
   TaskCore,
@@ -17,8 +18,10 @@ import {
 import {
   filterReportsByTargetType,
   MAX_REPORT_PAGES,
+  reportFromApi,
   sortReportsOpenFirst,
   toAdminReportsVariables,
+  type ReportApiPayload,
   type ReportPage,
   type ReportRow,
   type ReportStatus,
@@ -30,6 +33,7 @@ import type {
   AdminReportsQuery,
   AdminTasksQuery,
   AdminUpdateReportStatusMutation,
+  AdminUpdateReportStatusCoreMutation,
   AdminUsersQuery,
   ReportsQuery,
   TaskCoreQuery,
@@ -45,36 +49,10 @@ export type ReportListResult = {
   banner: string | null
 }
 
-type ReportPayload = {
-  id: string
-  targetId: string
-  targetType: ReportRow['targetType']
-  reason: ReportRow['reason']
-  details?: string | null
-  status: ReportRow['status']
-  targetUrl?: string | null
-  createdAt: unknown
-  updatedAt?: unknown
-  reporterUserId: string
-  targetTitle?: string | null
-  reporter?: ReportRow['reporter']
-}
+type ReportPayload = ReportApiPayload
 
 function asReportRow(row: ReportPayload): ReportRow {
-  return {
-    id: row.id,
-    targetId: row.targetId,
-    targetType: row.targetType,
-    reason: row.reason,
-    details: row.details,
-    status: row.status,
-    targetUrl: row.targetUrl,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    reporterUserId: row.reporterUserId,
-    targetTitle: row.targetTitle ?? null,
-    reporter: row.reporter ?? null,
-  }
+  return reportFromApi(row)
 }
 
 async function queryAdminReportsRich(
@@ -222,7 +200,7 @@ async function enrichReports(items: ReportRow[]): Promise<ReportRow[]> {
   const taskIds = [
     ...new Set(
       items
-        .filter((row) => row.targetType === 'TASK' && !row.targetTitle)
+        .filter((row) => row.targetType === 'TASK' && !row.targetLabel)
         .map((row) => row.targetId),
     ),
   ]
@@ -239,11 +217,15 @@ async function enrichReports(items: ReportRow[]): Promise<ReportRow[]> {
 
   return items.map((row) => ({
     ...row,
-    targetTitle:
-      row.targetTitle ||
+    targetLabel:
+      row.targetLabel ||
       (row.targetType === 'TASK' ? titles.get(row.targetId) : null) ||
       null,
     reporter: row.reporter || reporters.get(row.reporterUserId) || null,
+    reporterEmail:
+      row.reporterEmail ||
+      reporters.get(row.reporterUserId)?.email ||
+      null,
   }))
 }
 
@@ -315,6 +297,19 @@ export async function updateAdminReportStatus(
       mutation: AdminUpdateReportStatus,
       variables: { id, status },
     })
+    const updated = result.data?.adminUpdateReportStatus
+    if (!updated) throw new Error('adminUpdateReportStatus returned no report')
+    return asReportRow(updated)
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  try {
+    const result =
+      await apolloClient.mutate<AdminUpdateReportStatusCoreMutation>({
+        mutation: AdminUpdateReportStatusCore,
+        variables: { id, status },
+      })
     const updated = result.data?.adminUpdateReportStatus
     if (!updated) throw new Error('adminUpdateReportStatus returned no report')
     return asReportRow(updated)
