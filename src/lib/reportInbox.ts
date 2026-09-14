@@ -3,6 +3,7 @@ import {
   AdminReportsCore,
   AdminTasks,
   AdminUpdateReportStatus,
+  AdminUpdateReportStatusCore,
   AdminUsers,
   Reports,
   TaskCore,
@@ -32,6 +33,7 @@ import type {
   AdminReportsQuery,
   AdminTasksQuery,
   AdminUpdateReportStatusMutation,
+  AdminUpdateReportStatusCoreMutation,
   AdminUsersQuery,
   ReportsQuery,
   TaskCoreQuery,
@@ -295,6 +297,19 @@ export async function updateAdminReportStatus(
       mutation: AdminUpdateReportStatus,
       variables: { id, status },
     })
+    const updated = result.data?.adminUpdateReportStatus
+    if (!updated) throw new Error('adminUpdateReportStatus returned no report')
+    return asReportRow(updated)
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  try {
+    const result =
+      await apolloClient.mutate<AdminUpdateReportStatusCoreMutation>({
+        mutation: AdminUpdateReportStatusCore,
+        variables: { id, status },
+      })
     const updated = result.data?.adminUpdateReportStatus
     if (!updated) throw new Error('adminUpdateReportStatus returned no report')
     return asReportRow(updated)

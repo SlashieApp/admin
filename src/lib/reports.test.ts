@@ -191,6 +191,21 @@ describe('reportFromApi', () => {
     expect(taskTitle(row)).toBe('Garden fence')
     expect(reporterLabel(row)).toBe('pat@x.com')
   })
+
+  it('maps the pre-BE-46 targetTitle alias onto targetLabel', () => {
+    const row = reportFromApi({
+      id: 'r2',
+      targetId: 't2',
+      targetType: 'TASK',
+      reason: 'SCAM',
+      status: 'OPEN',
+      createdAt: '2026-09-14T12:00:00.000Z',
+      reporterUserId: 'u1',
+      targetTitle: 'Old title field',
+    })
+    expect(row.targetLabel).toBe('Old title field')
+    expect(taskTitle(row)).toBe('Old title field')
+  })
 })
 
 describe('mergeReportRow', () => {

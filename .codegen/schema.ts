@@ -797,6 +797,14 @@ export type AdminUpdateReportStatusMutationVariables = Exact<{
 
 export type AdminUpdateReportStatusMutation = { adminUpdateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string, reporterEmail?: string | null, targetLabel?: string | null, reporter?: { id: string, email: string, profile?: { name?: string | null } | null } | null } };
 
+export type AdminUpdateReportStatusCoreMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  status: ReportStatus;
+}>;
+
+
+export type AdminUpdateReportStatusCoreMutation = { adminUpdateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string } };
+
 export type UpdateReportStatusMutationVariables = Exact<{
   id: Scalars['ID']['input'];
   status: ReportStatus;

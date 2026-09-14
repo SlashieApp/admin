@@ -519,6 +519,15 @@ export const AdminUpdateReportStatus = gql`
   }
 `
 
+export const AdminUpdateReportStatusCore = gql`
+  ${REPORT_CORE_FIELDS}
+  mutation AdminUpdateReportStatusCore($id: ID!, $status: ReportStatus!) {
+    adminUpdateReportStatus(id: $id, status: $status) {
+      ...ReportCoreFields
+    }
+  }
+`
+
 export const UpdateReportStatus = gql`
   ${REPORT_CORE_FIELDS}
   mutation UpdateReportStatus($id: ID!, $status: ReportStatus!) {
