@@ -316,15 +316,6 @@ export const AdminTasks = gql`
   }
 `
 
-export const AdminTasksLegacy = gql`
-  ${TASK_LIST_FIELDS}
-  query AdminTasksLegacy($search: String, $id: ID) {
-    adminTasks(search: $search, id: $id) {
-      ...TaskListFields
-    }
-  }
-`
-
 export const AdminTask = gql`
   ${TASK_DOSSIER_FIELDS}
   ${USER_ADMIN_FIELDS}

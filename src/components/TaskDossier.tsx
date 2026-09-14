@@ -8,7 +8,6 @@ import { PostHogAnalytics } from '@/components/PostHogAnalytics'
 import {
   AdminTask,
   AdminTaskByFilter,
-  AdminTasksLegacy,
   Task,
   TaskCore,
 } from '@/graphql/operations'
@@ -27,7 +26,6 @@ import {
 import type {
   AdminTaskByFilterQuery,
   AdminTaskQuery,
-  AdminTasksLegacyQuery,
   TaskCoreQuery,
   TaskQuery,
 } from '@codegen/schema'
@@ -157,8 +155,8 @@ export function TaskDossier({ taskId }: { taskId: string }) {
                 <dd>
                   {task.datetime
                     ? [task.datetime.type, task.datetime.date, task.datetime.time]
-                        .filter(Boolean)
-                        .join(' · ') || '—'
+                      .filter(Boolean)
+                      .join(' · ') || '—'
                     : '—'}
                 </dd>
               </div>
@@ -346,28 +344,6 @@ async function loadDossier(id: string): Promise<{
         data: { task, dossier: null, source: 'adminTasks' },
         banner:
           'adminTask dossier is not on this Apollo yet (BE-43). Showing related records from adminTasks.',
-      }
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result = await apolloClient.query<AdminTasksLegacyQuery>({
-      query: AdminTasksLegacy,
-      variables: { id, search: id },
-      fetchPolicy: 'network-only',
-    })
-    const task = result.data?.adminTasks?.[0]
-    if (task) {
-      return {
-        data: {
-          task: task as DossierTask,
-          dossier: null,
-          source: 'adminTasks',
-        },
-        banner:
-          'Loaded via legacy adminTasks(search, id). Quotes, orders, and activity need BE-43 adminTask.',
       }
     }
   } catch (error) {

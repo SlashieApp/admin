@@ -3,30 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ADMIN_PAGE_SIZE,
   parseAdminHomeMode,
-  toAdminSearchVariables,
   toAdminTaskListVariables,
   toAdminTaskVariables,
   toAdminUserListVariables,
 } from './search'
-
-describe('toAdminSearchVariables', () => {
-  it('sends free text as search only', () => {
-    expect(toAdminSearchVariables('  leaky tap ')).toEqual({
-      search: 'leaky tap',
-    })
-  })
-
-  it('also passes id when the query looks like an id', () => {
-    expect(toAdminSearchVariables('507f1f77bcf86cd799439011')).toEqual({
-      search: '507f1f77bcf86cd799439011',
-      id: '507f1f77bcf86cd799439011',
-    })
-  })
-
-  it('returns empty vars for blank input', () => {
-    expect(toAdminSearchVariables('   ')).toEqual({})
-  })
-})
 
 describe('toAdminTaskListVariables', () => {
   it('omits filter on empty query so login can load newest tasks', () => {

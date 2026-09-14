@@ -4,12 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-import {
-  AdminTasks,
-  AdminTasksLegacy,
-  AdminUsers,
-  Tasks,
-} from '@/graphql/operations'
+import { AdminTasks, AdminUsers, Tasks } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import {
   graphqlErrorMessage,
@@ -17,14 +12,12 @@ import {
 } from '@/lib/graphqlErrors'
 import {
   parseAdminHomeMode,
-  toAdminSearchVariables,
   toAdminTaskListVariables,
   toAdminUserListVariables,
 } from '@/lib/search'
 import { displayName } from '@/lib/dossier'
 import { isWorkerUser } from '@/lib/userInput'
 import type {
-  AdminTasksLegacyQuery,
   AdminTasksQuery,
   AdminUsersQuery,
   TasksQuery,
@@ -229,21 +222,6 @@ async function listTasks(query: string): Promise<{
       fetchPolicy: 'network-only',
     })
     return { rows: result.data?.adminTasks ?? [], banner: null }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result = await apolloClient.query<AdminTasksLegacyQuery>({
-      query: AdminTasksLegacy,
-      variables: toAdminSearchVariables(query),
-      fetchPolicy: 'network-only',
-    })
-    return {
-      rows: result.data?.adminTasks ?? [],
-      banner:
-        'This Apollo still uses legacy adminTasks(search, id). Showing that list.',
-    }
   } catch (error) {
     if (!isMissingAdminFieldError(error)) throw error
   }

@@ -3,12 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-import {
-  AdminTasks,
-  AdminTasksLegacy,
-  AdminUpdateTask,
-  TaskCore,
-} from '@/graphql/operations'
+import { AdminTasks, AdminUpdateTask, TaskCore } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import {
   graphqlErrorMessage,
@@ -23,7 +18,6 @@ import {
 } from '@/lib/taskInput'
 import { Currency, TaskBudgetType, TaskPaymentMethod } from '@codegen/schema'
 import type {
-  AdminTasksLegacyQuery,
   AdminTasksQuery,
   AdminUpdateTaskMutation,
   TaskCoreQuery,
@@ -318,18 +312,6 @@ async function loadTask(id: string): Promise<{
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
       variables: { filter: { id }, first: 1 },
-      fetchPolicy: 'network-only',
-    })
-    const task = result.data?.adminTasks?.[0]
-    if (task) return { task, fallback: false }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result = await apolloClient.query<AdminTasksLegacyQuery>({
-      query: AdminTasksLegacy,
-      variables: { id, search: id },
       fetchPolicy: 'network-only',
     })
     const task = result.data?.adminTasks?.[0]

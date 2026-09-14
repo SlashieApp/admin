@@ -24,9 +24,6 @@ Default inbox: omit `status` (all statuses, API newest-first)
 and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
 actionable reports without hiding history.
 
-Legacy BE-42 `adminTasks(search, id)` args are kept so the panel can fall
-back if an environment has not switched to `filter`.
-
 See https://linear.app/slashie/issue/BE-42
 See https://linear.app/slashie/issue/BE-43
 See https://linear.app/slashie/issue/BE-46
@@ -484,13 +481,7 @@ type Query {
   workers(filter: WorkerFilter): [worker!]!
   order(id: ID, taskId: ID): Order
   """BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page."""
-  adminTasks(
-    filter: AdminTaskFilter
-    first: Int = 50
-    """Legacy BE-42 args kept for fallback queries."""
-    search: String
-    id: ID
-  ): [Task!]!
+  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
   """BE-43 @admin — full related records for one task."""
   adminTask(id: ID!): AdminTaskDossier!
   """BE-42 @admin — search workers by text and/or id."""

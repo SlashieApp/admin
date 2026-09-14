@@ -4,11 +4,6 @@ export const DEFAULT_ADMIN_PAGE_SIZE = 50
 
 export type AdminHomeMode = 'tasks' | 'users'
 
-export type AdminSearchVariables = {
-  search?: string
-  id?: string
-}
-
 export type AdminTaskFilter = {
   search?: string
   id?: string
@@ -25,16 +20,7 @@ export type AdminUserListVariables = {
   first: number
 }
 
-export function toAdminSearchVariables(raw: string): AdminSearchVariables {
-  const query = raw.trim()
-  if (!query) return {}
-  if (looksLikeId(query)) {
-    return { search: query, id: query }
-  }
-  return { search: query }
-}
-
-/** Live `adminTasks` takes `AdminTaskFilter` + `first`, not top-level search/id. */
+/** Live `adminTasks` takes `AdminTaskFilter` + `first`. */
 export function toAdminTaskListVariables(
   raw: string,
   first = DEFAULT_ADMIN_PAGE_SIZE,
