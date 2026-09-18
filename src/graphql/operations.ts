@@ -528,6 +528,143 @@ export const UpdateReportStatus = gql`
   }
 `
 
+const FEEDBACK_FIELDS = gql`
+  fragment FeedbackFields on Feedback {
+    id
+    userId
+    email
+    name
+    category
+    rating
+    message
+    pageUrl
+    path
+    userAgent
+    status
+    ackEmailSentAt
+    createdAt
+    updatedAt
+  }
+`
+
+const FEEDBACK_CORE_FIELDS = gql`
+  fragment FeedbackCoreFields on Feedback {
+    id
+    userId
+    email
+    name
+    category
+    rating
+    message
+    pageUrl
+    status
+    createdAt
+    updatedAt
+  }
+`
+
+export const AdminFeedbackSummary = gql`
+  query AdminFeedbackSummary {
+    adminFeedbackSummary {
+      total
+      open
+      reviewed
+      replied
+    }
+  }
+`
+
+export const AdminFeedbacks = gql`
+  ${FEEDBACK_FIELDS}
+  query AdminFeedbacks(
+    $status: FeedbackStatus
+    $category: FeedbackCategory
+    $first: Int
+    $after: String
+  ) {
+    adminFeedbacks(
+      status: $status
+      category: $category
+      first: $first
+      after: $after
+    ) {
+      nextCursor
+      items {
+        ...FeedbackFields
+      }
+    }
+  }
+`
+
+export const AdminFeedbacksCore = gql`
+  ${FEEDBACK_CORE_FIELDS}
+  query AdminFeedbacksCore(
+    $status: FeedbackStatus
+    $category: FeedbackCategory
+    $first: Int
+    $after: String
+  ) {
+    adminFeedbacks(
+      status: $status
+      category: $category
+      first: $first
+      after: $after
+    ) {
+      nextCursor
+      items {
+        ...FeedbackCoreFields
+      }
+    }
+  }
+`
+
+export const AdminUpdateFeedbackStatus = gql`
+  ${FEEDBACK_FIELDS}
+  mutation AdminUpdateFeedbackStatus($id: ID!, $status: FeedbackStatus!) {
+    adminUpdateFeedbackStatus(id: $id, status: $status) {
+      ...FeedbackFields
+    }
+  }
+`
+
+export const AdminUpdateFeedbackStatusCore = gql`
+  ${FEEDBACK_CORE_FIELDS}
+  mutation AdminUpdateFeedbackStatusCore($id: ID!, $status: FeedbackStatus!) {
+    adminUpdateFeedbackStatus(id: $id, status: $status) {
+      ...FeedbackCoreFields
+    }
+  }
+`
+
+export const AdminFeedbackDraftReply = gql`
+  query AdminFeedbackDraftReply($id: ID!) {
+    adminFeedbackDraftReply(id: $id) {
+      subject
+      bodyText
+      bodyHtml
+    }
+  }
+`
+
+export const AdminFeedbackDraftReplyCore = gql`
+  query AdminFeedbackDraftReplyCore($id: ID!) {
+    adminFeedbackDraftReply(id: $id) {
+      subject
+      bodyText
+    }
+  }
+`
+
+export const AdminFeedbackDraftReplyMutation = gql`
+  mutation AdminFeedbackDraftReplyMutation($id: ID!) {
+    adminFeedbackDraftReply(id: $id) {
+      subject
+      bodyText
+      bodyHtml
+    }
+  }
+`
+
 export const AdminOpsSummary = gql`
   query AdminOpsSummary($range: AdminOpsRange!) {
     adminOpsSummary(range: $range) {
