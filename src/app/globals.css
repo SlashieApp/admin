@@ -846,6 +846,14 @@ select.input {
   .layout-split {
     grid-template-columns: 1fr;
   }
+
+  .layout-split.has-selection .sticky-detail {
+    order: -1;
+  }
+
+  .sticky-detail {
+    position: static;
+  }
 }
 
 @media (max-width: 767px) {

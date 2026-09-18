@@ -1,9 +1,12 @@
 import {
   AdminFeedbackDraftReply,
+  AdminFeedbackDraftReplyCore,
   AdminFeedbackDraftReplyMutation,
   AdminFeedbackSummary,
   AdminFeedbacks,
+  AdminFeedbacksCore,
   AdminUpdateFeedbackStatus,
+  AdminUpdateFeedbackStatusCore,
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { graphqlErrorMessage, isMissingAdminFieldError } from '@/lib/graphqlErrors'
@@ -22,10 +25,13 @@ import {
   type FeedbackSummary,
 } from '@/lib/feedback'
 import type {
+  AdminFeedbackDraftReplyCoreQuery,
   AdminFeedbackDraftReplyMutationMutation,
   AdminFeedbackDraftReplyQuery,
   AdminFeedbackSummaryQuery,
+  AdminFeedbacksCoreQuery,
   AdminFeedbacksQuery,
+  AdminUpdateFeedbackStatusCoreMutation,
   AdminUpdateFeedbackStatusMutation,
 } from '@codegen/schema'
 
@@ -47,6 +53,21 @@ async function queryAdminFeedbacks(
 ): Promise<FeedbackPage> {
   const result = await apolloClient.query<AdminFeedbacksQuery>({
     query: AdminFeedbacks,
+    variables,
+    fetchPolicy: 'network-only',
+  })
+  const page = result.data?.adminFeedbacks
+  return {
+    items: (page?.items ?? []).map(asFeedbackRow),
+    nextCursor: page?.nextCursor ?? null,
+  }
+}
+
+async function queryAdminFeedbacksCore(
+  variables: ReturnType<typeof toAdminFeedbacksVariables>,
+): Promise<FeedbackPage> {
+  const result = await apolloClient.query<AdminFeedbacksCoreQuery>({
+    query: AdminFeedbacksCore,
     variables,
     fetchPolicy: 'network-only',
   })
@@ -102,6 +123,22 @@ export async function listAdminFeedbacks(input: {
       banner: null,
     }
   } catch (error) {
+    if (!isMissingAdminFieldError(error)) {
+      throw new Error(graphqlErrorMessage(error))
+    }
+  }
+
+  try {
+    const page = await drainPages(
+      (after) => queryAdminFeedbacksCore({ ...base, after }),
+      input.after,
+    )
+    return {
+      items: decorateList(page.items, input.status),
+      nextCursor: page.nextCursor ?? null,
+      banner: null,
+    }
+  } catch (error) {
     if (isMissingAdminFieldError(error)) {
       throw new Error(MISSING_API)
     }
@@ -143,12 +180,37 @@ export async function updateAdminFeedbackStatus(
     if (!updated) throw new Error('adminUpdateFeedbackStatus returned no feedback')
     return asFeedbackRow(updated)
   } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  try {
+    const result =
+      await apolloClient.mutate<AdminUpdateFeedbackStatusCoreMutation>({
+        mutation: AdminUpdateFeedbackStatusCore,
+        variables: { id, status },
+      })
+    const updated = result.data?.adminUpdateFeedbackStatus
+    if (!updated) throw new Error('adminUpdateFeedbackStatus returned no feedback')
+    return asFeedbackRow(updated)
+  } catch (error) {
     if (isMissingAdminFieldError(error)) {
       throw new Error(
         'adminUpdateFeedbackStatus is not on this Apollo yet (BE-48).',
       )
     }
     throw error
+  }
+}
+
+function asDraft(draft: {
+  subject: string
+  bodyText: string
+  bodyHtml?: string | null
+}): FeedbackDraftReply {
+  return {
+    subject: draft.subject,
+    bodyText: draft.bodyText,
+    bodyHtml: draft.bodyHtml,
   }
 }
 
@@ -163,11 +225,20 @@ export async function loadFeedbackDraftReply(
     })
     const draft = result.data?.adminFeedbackDraftReply
     if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
-    return {
-      subject: draft.subject,
-      bodyText: draft.bodyText,
-      bodyHtml: draft.bodyHtml,
-    }
+    return asDraft(draft)
+  } catch (error) {
+    if (!isMissingAdminFieldError(error)) throw error
+  }
+
+  try {
+    const result = await apolloClient.query<AdminFeedbackDraftReplyCoreQuery>({
+      query: AdminFeedbackDraftReplyCore,
+      variables: { id },
+      fetchPolicy: 'network-only',
+    })
+    const draft = result.data?.adminFeedbackDraftReply
+    if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
+    return asDraft(draft)
   } catch (error) {
     if (!isMissingAdminFieldError(error)) throw error
   }
@@ -180,11 +251,7 @@ export async function loadFeedbackDraftReply(
       })
     const draft = result.data?.adminFeedbackDraftReply
     if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
-    return {
-      subject: draft.subject,
-      bodyText: draft.bodyText,
-      bodyHtml: draft.bodyHtml,
-    }
+    return asDraft(draft)
   } catch (error) {
     if (isMissingAdminFieldError(error)) {
       throw new Error(

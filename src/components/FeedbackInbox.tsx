@@ -34,6 +34,7 @@ import {
   updateAdminFeedbackStatus,
 } from '@/lib/feedbackInbox'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
+import { usePrefersReducedMotion } from '@/lib/usePrefersReducedMotion'
 
 const STATUS_FILTERS: { value: FeedbackStatusFilter; label: string }[] = [
   { value: 'ALL', label: 'All statuses' },
@@ -82,6 +83,7 @@ function FeedbackPanel({
   const [banner, setBanner] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
+  const reduceMotion = usePrefersReducedMotion()
 
   useEffect(() => {
     let cancelled = false
@@ -137,6 +139,14 @@ function FeedbackPanel({
   const selected = selectedId
     ? (rows.find((row) => row.id === selectedId) ?? null)
     : null
+
+  useEffect(() => {
+    if (!selectedId) return
+    document.getElementById('feedback-detail')?.scrollIntoView({
+      block: 'start',
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    })
+  }, [selectedId, reduceMotion])
 
   return (
     <section className="stack">
@@ -225,7 +235,7 @@ function FeedbackPanel({
         <p className="muted">No feedback for this filter.</p>
       ) : null}
 
-      <div className="layout-split">
+      <div className={selected ? 'layout-split has-selection' : 'layout-split'}>
         <ul className="list">
           {rows.map((row) => {
             const href = submitterHref(row)
@@ -347,7 +357,7 @@ function FeedbackDetail({
 }) {
   if (!row) {
     return (
-      <aside className="section sticky-detail">
+      <aside id="feedback-detail" className="section sticky-detail">
         <h2>Detail + draft reply</h2>
         <p className="muted">
           Select a submission to see the full record and a templated reply.
@@ -360,7 +370,7 @@ function FeedbackDetail({
   const href = submitterHref(row)
 
   return (
-    <aside className="section sticky-detail">
+    <aside id="feedback-detail" className="section sticky-detail">
       <div className="card-top">
         <h2>{submitterLabel(row)}</h2>
         <span
@@ -497,7 +507,8 @@ function DraftReplyPanel({ row }: { row: FeedbackRow }) {
       <h3>Draft reply</h3>
       <p className="muted">
         Template quotes this submission. Copy or open mailto — do not auto-send
-        from admin.
+        from admin. Use Copy if the message is long; some mail apps truncate
+        mailto bodies.
       </p>
       {busy ? <p className="muted">Loading draft…</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}

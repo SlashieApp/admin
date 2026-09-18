@@ -910,6 +910,8 @@ export type UpdateReportStatusMutation = { updateReportStatus: { id: string, tar
 
 export type FeedbackFieldsFragment = { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any };
 
+export type FeedbackCoreFieldsFragment = { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, status: FeedbackStatus, createdAt: any, updatedAt: any };
+
 export type AdminFeedbackSummaryQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -925,6 +927,16 @@ export type AdminFeedbacksQueryVariables = Exact<{
 
 export type AdminFeedbacksQuery = { adminFeedbacks: { nextCursor?: string | null, items: Array<{ id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any }> } };
 
+export type AdminFeedbacksCoreQueryVariables = Exact<{
+  status?: InputMaybe<FeedbackStatus>;
+  category?: InputMaybe<FeedbackCategory>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AdminFeedbacksCoreQuery = { adminFeedbacks: { nextCursor?: string | null, items: Array<{ id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, status: FeedbackStatus, createdAt: any, updatedAt: any }> } };
+
 export type AdminUpdateFeedbackStatusMutationVariables = Exact<{
   id: Scalars['ID']['input'];
   status: FeedbackStatus;
@@ -933,12 +945,27 @@ export type AdminUpdateFeedbackStatusMutationVariables = Exact<{
 
 export type AdminUpdateFeedbackStatusMutation = { adminUpdateFeedbackStatus: { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any } };
 
+export type AdminUpdateFeedbackStatusCoreMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  status: FeedbackStatus;
+}>;
+
+
+export type AdminUpdateFeedbackStatusCoreMutation = { adminUpdateFeedbackStatus: { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, status: FeedbackStatus, createdAt: any, updatedAt: any } };
+
 export type AdminFeedbackDraftReplyQueryVariables = Exact<{
   id: Scalars['ID']['input'];
 }>;
 
 
 export type AdminFeedbackDraftReplyQuery = { adminFeedbackDraftReply: { subject: string, bodyText: string, bodyHtml?: string | null } };
+
+export type AdminFeedbackDraftReplyCoreQueryVariables = Exact<{
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type AdminFeedbackDraftReplyCoreQuery = { adminFeedbackDraftReply: { subject: string, bodyText: string } };
 
 export type AdminFeedbackDraftReplyMutationMutationVariables = Exact<{
   id: Scalars['ID']['input'];

@@ -51,7 +51,7 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 
 Default inbox: omit `status`, pass `targetType: TASK`. The panel shows OPEN first. Report cards use BE-46 `targetLabel` (task title) and `reporter` / `reporterEmail`. If BE-46 fields are missing, it falls back to BE-40 `reports` / `updateReportStatus` (env allowlist) with a banner.
 
-`/feedback` uses BE-48 `adminFeedbackSummary` + `adminFeedbacks` (newest first; panel OPEN-first when status=ALL) and `adminUpdateFeedbackStatus`. Selecting an item calls `adminFeedbackDraftReply` and shows subject/body with Copy + optional `mailto:`. The panel does not send the personalized reply. Banner if those fields are not on Apollo yet.
+`/feedback` uses BE-48 `adminFeedbackSummary` + `adminFeedbacks` (newest first; panel OPEN-first when status=ALL) and `adminUpdateFeedbackStatus`. Selecting an item calls `adminFeedbackDraftReply` and shows subject/body with Copy + optional `mailto:`. The panel does not send the personalized reply. If optional fields like `path` are missing, the inbox retries a core selection. Banner if the `@admin` fields are not on Apollo yet.
 
 If BE-43/44 fields are not on the pointed-at API yet, the panel shows a banner and falls back where it can. User search/management and Mongo ops counts have no public fallback.
 
