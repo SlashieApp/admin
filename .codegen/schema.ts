@@ -24,10 +24,14 @@ export type Scalars = {
    *   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
    *   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
    *   adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!
+   *   adminFeedbackSummary: AdminFeedbackSummary!
+   *   adminFeedbacks(status: FeedbackStatus, category: FeedbackCategory, first: Int = 50, after: String): FeedbackPage!
+   *   adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
    *   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
    *   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
    *   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
    *   adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
+   *   adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback!
    *
    * BE-46 report inbox is `@admin` (Admin collection + `@slashie.app`). It does
    * not require env ADMIN_EMAILS. BE-40 env-allowlist
@@ -38,15 +42,32 @@ export type Scalars = {
    * and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
    * actionable reports without hiding history.
    *
-   * Legacy BE-42 `adminTasks(search, id)` args are kept so the panel can fall
-   * back if an environment has not switched to `filter`.
+   * Product feedback (BE-48) is a separate domain from trust-and-safety
+   * reports. Default inbox: omit status and category (newest first); the
+   * panel then displays OPEN-first. Draft reply is a template for a human
+   * to send — it is not auto-sent from this panel.
    *
    * See https://linear.app/slashie/issue/BE-42
    * See https://linear.app/slashie/issue/BE-43
    * See https://linear.app/slashie/issue/BE-46
+   * See https://linear.app/slashie/issue/BE-48
    */
   DateTime: { input: any; output: any; }
   JSON: { input: any; output: any; }
+};
+
+/** Templated ops reply. Not sent automatically — human copies or mailto. */
+export type AdminFeedbackDraftReply = {
+  bodyHtml?: Maybe<Scalars['String']['output']>;
+  bodyText: Scalars['String']['output'];
+  subject: Scalars['String']['output'];
+};
+
+export type AdminFeedbackSummary = {
+  open: Scalars['Int']['output'];
+  replied: Scalars['Int']['output'];
+  reviewed: Scalars['Int']['output'];
+  total: Scalars['Int']['output'];
 };
 
 export type AdminOpsMetric = {
@@ -150,6 +171,47 @@ export enum Currency {
   Usd = 'USD'
 }
 
+/**
+ * Product feedback submission (BE-48). Distinct from Report / createReport.
+ * Guests are allowed — userId is null when the submitter was signed out.
+ */
+export type Feedback = {
+  ackEmailSentAt?: Maybe<Scalars['DateTime']['output']>;
+  category: FeedbackCategory;
+  createdAt: Scalars['DateTime']['output'];
+  email: Scalars['String']['output'];
+  id: Scalars['ID']['output'];
+  message: Scalars['String']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  pageUrl?: Maybe<Scalars['String']['output']>;
+  path?: Maybe<Scalars['String']['output']>;
+  rating?: Maybe<Scalars['Int']['output']>;
+  status: FeedbackStatus;
+  updatedAt: Scalars['DateTime']['output'];
+  userAgent?: Maybe<Scalars['String']['output']>;
+  userId?: Maybe<Scalars['ID']['output']>;
+};
+
+export enum FeedbackCategory {
+  Bug = 'BUG',
+  FeatureRequest = 'FEATURE_REQUEST',
+  General = 'GENERAL',
+  Rating = 'RATING'
+}
+
+export type FeedbackPage = {
+  items: Array<Feedback>;
+  /** Opaque cursor (feedback id) for the next page, or null when done. */
+  nextCursor?: Maybe<Scalars['String']['output']>;
+};
+
+export enum FeedbackStatus {
+  Dismissed = 'DISMISSED',
+  Open = 'OPEN',
+  Replied = 'REPLIED',
+  Reviewed = 'REVIEWED'
+}
+
 export enum IdentityVerificationStatus {
   NotStarted = 'NOT_STARTED',
   Pending = 'PENDING',
@@ -178,8 +240,15 @@ export enum LoginMethod {
 }
 
 export type Mutation = {
+  /**
+   * BE-48 draft reply mutation form (if the API ships it here instead of Query).
+   * Does not send email.
+   */
+  adminFeedbackDraftReply: AdminFeedbackDraftReply;
   /** BE-43 @admin — disable or re-enable a user if the API ships it. */
   adminSetUserDisabled: User;
+  /** BE-48 @admin — set product feedback status. */
+  adminUpdateFeedbackStatus: Feedback;
   /** BE-46 @admin — set report status. Does not require ADMIN_EMAILS. */
   adminUpdateReportStatus: Report;
   /** BE-42 @admin — god-mode task update (ignores owner checks). */
@@ -192,9 +261,20 @@ export type Mutation = {
 };
 
 
+export type MutationAdminFeedbackDraftReplyArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
 export type MutationAdminSetUserDisabledArgs = {
   disabled: Scalars['Boolean']['input'];
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationAdminUpdateFeedbackStatusArgs = {
+  id: Scalars['ID']['input'];
+  status: FeedbackStatus;
 };
 
 
@@ -293,6 +373,18 @@ export type Profile = {
 };
 
 export type Query = {
+  /**
+   * BE-48 @admin — templated reply quoting this feedback. Query form.
+   * Does not send email.
+   */
+  adminFeedbackDraftReply: AdminFeedbackDraftReply;
+  /** BE-48 @admin — product feedback counts (total / open / reviewed / replied). */
+  adminFeedbackSummary: AdminFeedbackSummary;
+  /**
+   * BE-48 @admin — product feedback inbox. Newest first. Paginate with after.
+   * Omit status/category for all. Distinct from adminReports.
+   */
+  adminFeedbacks: FeedbackPage;
   /** BE-44 @admin — Mongo-authoritative ops KPIs. */
   adminOpsSummary: AdminOpsSummary;
   /**
@@ -322,6 +414,19 @@ export type Query = {
 };
 
 
+export type QueryAdminFeedbackDraftReplyArgs = {
+  id: Scalars['ID']['input'];
+};
+
+
+export type QueryAdminFeedbacksArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  category?: InputMaybe<FeedbackCategory>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  status?: InputMaybe<FeedbackStatus>;
+};
+
+
 export type QueryAdminOpsSummaryArgs = {
   dateFrom?: InputMaybe<Scalars['DateTime']['input']>;
   dateTo?: InputMaybe<Scalars['DateTime']['input']>;
@@ -345,8 +450,6 @@ export type QueryAdminTaskArgs = {
 export type QueryAdminTasksArgs = {
   filter?: InputMaybe<AdminTaskFilter>;
   first?: InputMaybe<Scalars['Int']['input']>;
-  id?: InputMaybe<Scalars['ID']['input']>;
-  search?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -675,14 +778,6 @@ export type AdminTasksQueryVariables = Exact<{
 
 export type AdminTasksQuery = { adminTasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null }> };
 
-export type AdminTasksLegacyQueryVariables = Exact<{
-  search?: InputMaybe<Scalars['String']['input']>;
-  id?: InputMaybe<Scalars['ID']['input']>;
-}>;
-
-
-export type AdminTasksLegacyQuery = { adminTasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null }> };
-
 export type AdminTaskQueryVariables = Exact<{
   id: Scalars['ID']['input'];
 }>;
@@ -812,6 +907,45 @@ export type UpdateReportStatusMutationVariables = Exact<{
 
 
 export type UpdateReportStatusMutation = { updateReportStatus: { id: string, targetId: string, targetType: ReportTargetType, reason: ReportReason, details?: string | null, status: ReportStatus, targetUrl?: string | null, createdAt: any, updatedAt: any, reporterUserId: string } };
+
+export type FeedbackFieldsFragment = { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any };
+
+export type AdminFeedbackSummaryQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type AdminFeedbackSummaryQuery = { adminFeedbackSummary: { total: number, open: number, reviewed: number, replied: number } };
+
+export type AdminFeedbacksQueryVariables = Exact<{
+  status?: InputMaybe<FeedbackStatus>;
+  category?: InputMaybe<FeedbackCategory>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AdminFeedbacksQuery = { adminFeedbacks: { nextCursor?: string | null, items: Array<{ id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any }> } };
+
+export type AdminUpdateFeedbackStatusMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  status: FeedbackStatus;
+}>;
+
+
+export type AdminUpdateFeedbackStatusMutation = { adminUpdateFeedbackStatus: { id: string, userId?: string | null, email: string, name?: string | null, category: FeedbackCategory, rating?: number | null, message: string, pageUrl?: string | null, path?: string | null, userAgent?: string | null, status: FeedbackStatus, ackEmailSentAt?: any | null, createdAt: any, updatedAt: any } };
+
+export type AdminFeedbackDraftReplyQueryVariables = Exact<{
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type AdminFeedbackDraftReplyQuery = { adminFeedbackDraftReply: { subject: string, bodyText: string, bodyHtml?: string | null } };
+
+export type AdminFeedbackDraftReplyMutationMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+}>;
+
+
+export type AdminFeedbackDraftReplyMutationMutation = { adminFeedbackDraftReply: { subject: string, bodyText: string, bodyHtml?: string | null } };
 
 export type AdminOpsSummaryQueryVariables = Exact<{
   range: AdminOpsRange;

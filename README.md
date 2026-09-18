@@ -2,7 +2,7 @@
 
 Private ops panel for the Slashie marketplace. Google sign-in, dashboard, auto-loaded task list, user search/management, and god-mode task edits via Apollo `@admin` APIs ([BE-42](https://linear.app/slashie/issue/BE-42), [BE-43](https://linear.app/slashie/issue/BE-43), [BE-44](https://linear.app/slashie/issue/BE-44)).
 
-Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks).
+Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply).
 
 ## Stack
 
@@ -23,7 +23,7 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports**. Landing `/` is Tasks with auto-load. People search is Users-only (worker profiles appear on user detail and as related records on a task dossier). `/reports` is the trust-and-safety inbox (default: task reports).
+**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with auto-load. People search is Users-only (worker profiles appear on user detail and as related records on a task dossier). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox (bugs, ratings, feature requests, comments) with a human-sent draft reply — not the Reports queue.
 
 ## GraphQL
 
@@ -40,12 +40,18 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 | `adminSetUserDisabled` | `(id: ID!, disabled: Boolean!): User!` |
 | `adminReports` | `(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!` |
 | `adminUpdateReportStatus` | `(id: ID!, status: ReportStatus!): Report!` |
+| `adminFeedbackSummary` | `: AdminFeedbackSummary!` |
+| `adminFeedbacks` | `(status: FeedbackStatus, category: FeedbackCategory, first: Int = 50, after: String): FeedbackPage!` |
+| `adminUpdateFeedbackStatus` | `(id: ID!, status: FeedbackStatus!): Feedback!` |
+| `adminFeedbackDraftReply` | `(id: ID!): AdminFeedbackDraftReply!` |
 
 `AdminTaskFilter`: `search`, `id`, `status`, `hidden`.
 
 `AdminOpsRange`: `LAST_7_DAYS` | `LAST_30_DAYS` | `THIS_MONTH` | `LAST_MONTH`. Empty/omitted `adminTasks` filter returns the latest page of tasks (default `first` 50). Same for `adminUsers` with empty search.
 
 Default inbox: omit `status`, pass `targetType: TASK`. The panel shows OPEN first. Report cards use BE-46 `targetLabel` (task title) and `reporter` / `reporterEmail`. If BE-46 fields are missing, it falls back to BE-40 `reports` / `updateReportStatus` (env allowlist) with a banner.
+
+`/feedback` uses BE-48 `adminFeedbackSummary` + `adminFeedbacks` (newest first; panel OPEN-first when status=ALL) and `adminUpdateFeedbackStatus`. Selecting an item calls `adminFeedbackDraftReply` and shows subject/body with Copy + optional `mailto:`. The panel does not send the personalized reply. Banner if those fields are not on Apollo yet.
 
 If BE-43/44 fields are not on the pointed-at API yet, the panel shows a banner and falls back where it can. User search/management and Mongo ops counts have no public fallback.
 

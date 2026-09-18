@@ -23,6 +23,11 @@ describe('isMissingAdminFieldError', () => {
       ),
     ).toBe(true)
     expect(
+      isMissingAdminFieldError(
+        new Error('Cannot query field "adminFeedbacks" on type "Query".'),
+      ),
+    ).toBe(true)
+    expect(
       isMissingAdminFieldError(new Error('Not an admin')),
     ).toBe(false)
   })

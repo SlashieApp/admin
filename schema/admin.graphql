@@ -10,10 +10,14 @@ admin expansions. `@admin` fields:
   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
   adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
   adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!
+  adminFeedbackSummary: AdminFeedbackSummary!
+  adminFeedbacks(status: FeedbackStatus, category: FeedbackCategory, first: Int = 50, after: String): FeedbackPage!
+  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
   adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
+  adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback!
 
 BE-46 report inbox is `@admin` (Admin collection + `@slashie.app`). It does
 not require env ADMIN_EMAILS. BE-40 env-allowlist
@@ -24,9 +28,15 @@ Default inbox: omit `status` (all statuses, API newest-first)
 and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
 actionable reports without hiding history.
 
+Product feedback (BE-48) is a separate domain from trust-and-safety
+reports. Default inbox: omit status and category (newest first); the
+panel then displays OPEN-first. Draft reply is a template for a human
+to send — it is not auto-sent from this panel.
+
 See https://linear.app/slashie/issue/BE-42
 See https://linear.app/slashie/issue/BE-43
 See https://linear.app/slashie/issue/BE-46
+See https://linear.app/slashie/issue/BE-48
 """
 
 scalar DateTime
@@ -475,6 +485,61 @@ type ReportPage {
   nextCursor: String
 }
 
+enum FeedbackCategory {
+  BUG
+  RATING
+  FEATURE_REQUEST
+  GENERAL
+}
+
+enum FeedbackStatus {
+  OPEN
+  REVIEWED
+  REPLIED
+  DISMISSED
+}
+
+"""
+Product feedback submission (BE-48). Distinct from Report / createReport.
+Guests are allowed — userId is null when the submitter was signed out.
+"""
+type Feedback {
+  id: ID!
+  userId: ID
+  email: String!
+  name: String
+  category: FeedbackCategory!
+  rating: Int
+  message: String!
+  pageUrl: String
+  path: String
+  userAgent: String
+  status: FeedbackStatus!
+  ackEmailSentAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type FeedbackPage {
+  items: [Feedback!]!
+  """Opaque cursor (feedback id) for the next page, or null when done."""
+  nextCursor: String
+}
+
+type AdminFeedbackSummary {
+  total: Int!
+  open: Int!
+  reviewed: Int!
+  replied: Int!
+}
+
+"""Templated ops reply. Not sent automatically — human copies or mailto."""
+type AdminFeedbackDraftReply {
+  subject: String!
+  bodyText: String!
+  bodyHtml: String
+}
+
 type Query {
   me: User!
   task(id: ID!): Task
@@ -515,6 +580,23 @@ type Query {
     first: Int = 50
     after: String
   ): ReportPage!
+  """BE-48 @admin — product feedback counts (total / open / reviewed / replied)."""
+  adminFeedbackSummary: AdminFeedbackSummary!
+  """
+  BE-48 @admin — product feedback inbox. Newest first. Paginate with after.
+  Omit status/category for all. Distinct from adminReports.
+  """
+  adminFeedbacks(
+    status: FeedbackStatus
+    category: FeedbackCategory
+    first: Int = 50
+    after: String
+  ): FeedbackPage!
+  """
+  BE-48 @admin — templated reply quoting this feedback. Query form.
+  Does not send email.
+  """
+  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
 }
 
 type Mutation {
@@ -529,4 +611,11 @@ type Mutation {
   adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
   """BE-40 env-allowlist path kept for existing tools."""
   updateReportStatus(id: ID!, status: ReportStatus!): Report!
+  """BE-48 @admin — set product feedback status."""
+  adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback!
+  """
+  BE-48 draft reply mutation form (if the API ships it here instead of Query).
+  Does not send email.
+  """
+  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
 }

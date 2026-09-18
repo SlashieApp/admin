@@ -441,6 +441,11 @@ select.input {
   background: #f8edd4;
 }
 
+.pill-ok {
+  color: var(--ok);
+  background: #e4f7ee;
+}
+
 .filter-block {
   display: flex;
   flex-direction: column;
@@ -468,6 +473,34 @@ select.input {
 
 .report-kv {
   margin: 0;
+}
+
+.card.is-selected {
+  outline: 2px solid var(--brand);
+  outline-offset: 0;
+}
+
+.sticky-detail {
+  position: sticky;
+  top: 80px;
+}
+
+.draft-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feedback-kpis .metric.is-active {
+  outline: 2px solid var(--brand);
 }
 
 .inline-link {
@@ -791,6 +824,10 @@ select.input {
   .kpi-grid,
   .metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .feedback-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .search-row {
