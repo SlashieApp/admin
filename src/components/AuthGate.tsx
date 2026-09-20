@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 
-import { Header } from '@/components/Header'
+import { Header, SideNav } from '@/components/Header'
 import { useAuth } from '@/lib/auth'
 
 const PUBLIC_PATHS = new Set(['/login', '/forbidden'])
@@ -65,9 +65,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
       <Header />
-      <main id="main-content" className="main" tabIndex={-1}>
-        {children}
-      </main>
+      <div className="app-body">
+        <SideNav />
+        <main id="main-content" className="main" tabIndex={-1}>
+          {children}
+        </main>
+      </div>
     </div>
   )
 }

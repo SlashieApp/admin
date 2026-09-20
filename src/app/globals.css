@@ -27,6 +27,10 @@
   box-sizing: border-box;
 }
 
+html {
+  color-scheme: light;
+}
+
 html,
 body {
   margin: 0;
@@ -127,9 +131,44 @@ h3,
   margin: 0 auto;
 }
 
-.header-desktop {
+.app-body {
+  display: flex;
+  align-items: stretch;
+  min-height: calc(100vh - 64px);
+}
+
+.sidenav {
   display: none;
-  flex: 1;
+}
+
+.sidenav .header-nav {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidenav .tab {
+  justify-content: flex-start;
+  width: 100%;
+  color: var(--header-muted);
+  border-color: transparent;
+  background: transparent;
+  border-radius: 12px;
+}
+
+.sidenav .tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--header-text);
+}
+
+.sidenav .tab.is-active {
+  color: var(--brand-ink);
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.sidenav .tab.is-active:hover {
+  background: var(--brand);
+  color: var(--brand-ink);
 }
 
 .brand {
@@ -227,9 +266,17 @@ h3,
   border-color: var(--brand);
 }
 
-.header .btn-ghost {
+.header .btn-ghost,
+.header-logout {
+  background: transparent;
   color: var(--header-text);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.header .btn-ghost:hover,
+.header-logout:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--header-text);
 }
 
 .main,
@@ -237,6 +284,15 @@ h3,
   width: min(1100px, calc(100% - 32px));
   margin: 0 auto;
   padding: 24px 0 64px;
+}
+
+.app-body .main {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 24px 16px 64px;
 }
 
 .stack {
@@ -304,15 +360,6 @@ h3 {
   background: var(--bg-muted);
 }
 
-.header .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
 .input,
 .textarea,
 select.input {
@@ -324,6 +371,31 @@ select.input {
   border-radius: 12px;
   padding: 10px 12px;
   font: inherit;
+  color-scheme: light;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.search-input {
+  appearance: none;
+  -webkit-appearance: none;
+  height: var(--touch);
+  max-height: var(--touch);
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.search-input::-webkit-search-decoration {
+  display: none;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .textarea {
@@ -343,12 +415,56 @@ select.input {
   min-width: 0;
 }
 
-.search-row .input {
-  flex: 1 1 220px;
-}
-
 .search-row .btn {
   flex: 0 0 auto;
+}
+
+.data-table-wrap {
+  overflow-x: auto;
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.data-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--bg-muted);
+  vertical-align: middle;
+}
+
+.data-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--bg-muted);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr:hover {
+  background: #f4f8f6;
+}
+
+.table-link {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.table-link:hover {
+  text-decoration: underline;
 }
 
 .tabs {
@@ -808,10 +924,6 @@ select.input {
     padding: 8px 24px;
   }
 
-  .header-desktop {
-    display: block;
-  }
-
   .header-meta {
     display: flex;
   }
@@ -819,6 +931,25 @@ select.input {
   .header-menu-btn,
   .header-drawer {
     display: none;
+  }
+
+  .sidenav {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 220px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 64px;
+    align-self: flex-start;
+    min-height: calc(100vh - 64px);
+    padding: 16px 12px;
+    background: var(--header-bg);
+    color: var(--header-text);
+  }
+
+  .app-body .main {
+    padding: 24px 24px 64px;
   }
 
   .kpi-grid,
@@ -839,6 +970,10 @@ select.input {
   .main,
   .auth-main {
     width: min(1100px, calc(100% - 48px));
+  }
+
+  .app-body .main {
+    padding: 24px 32px 64px;
   }
 }
 

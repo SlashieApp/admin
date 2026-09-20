@@ -40,14 +40,9 @@ export function Header() {
         </Link>
         {user ? (
           <>
-            <div className="header-desktop">
-              <Suspense fallback={<HeaderNavFallback />}>
-                <HeaderNav onNavigate={() => setOpen(false)} />
-              </Suspense>
-            </div>
             <div className="header-meta">
               <span className="header-email">{user.email}</span>
-              <button type="button" className="btn btn-ghost" onClick={logout}>
+              <button type="button" className="btn btn-ghost header-logout" onClick={logout}>
                 Log out
               </button>
             </div>
@@ -70,12 +65,22 @@ export function Header() {
             <HeaderNav stacked onNavigate={() => setOpen(false)} />
           </Suspense>
           <p className="header-email header-email-mobile">{user.email}</p>
-          <button type="button" className="btn btn-ghost" onClick={logout}>
+          <button type="button" className="btn btn-ghost header-logout" onClick={logout}>
             Log out
           </button>
         </div>
       ) : null}
     </header>
+  )
+}
+
+export function SideNav() {
+  return (
+    <aside className="sidenav">
+      <Suspense fallback={<HeaderNavFallback stacked />}>
+        <HeaderNav stacked />
+      </Suspense>
+    </aside>
   )
 }
 

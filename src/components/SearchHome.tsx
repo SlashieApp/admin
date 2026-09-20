@@ -15,7 +15,7 @@ import {
   toAdminTaskListVariables,
   toAdminUserListVariables,
 } from '@/lib/search'
-import { displayName } from '@/lib/dossier'
+import { displayName, formatMoney } from '@/lib/dossier'
 import { isWorkerUser } from '@/lib/userInput'
 import type {
   AdminTasksQuery,
@@ -114,30 +114,11 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
         </p>
       </div>
 
-      <div className="tabs" role="tablist">
-        <Link
-          href="/"
-          role="tab"
-          aria-selected={mode === 'tasks'}
-          className={mode === 'tasks' ? 'tab is-active' : 'tab'}
-        >
-          Tasks
-        </Link>
-        <Link
-          href="/?mode=users"
-          role="tab"
-          aria-selected={mode === 'users'}
-          className={mode === 'users' ? 'tab is-active' : 'tab'}
-        >
-          Users
-        </Link>
-      </div>
-
       <form className="search-row" onSubmit={onSubmit}>
         <label className="field">
           {mode === 'users' ? 'Search users' : 'Search tasks'}
           <input
-            className="input"
+            className="input search-input"
             value={q}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder={
@@ -147,6 +128,7 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
             }
             type="search"
             autoComplete="off"
+            spellCheck={false}
           />
         </label>
         <button className="btn btn-primary" type="submit" disabled={busy}>
@@ -157,48 +139,99 @@ function SearchPanel({ mode }: { mode: 'tasks' | 'users' }) {
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
-      {mode === 'users' ? (
-        <ul className="list">
-          {users.map((user) => (
-            <li key={user.id} className="card">
-              <Link href={`/users/${user.id}`} className="card-link">
-                <div className="card-top">
-                  <strong>{displayName(user)}</strong>
-                  {isWorkerUser(user) ? (
-                    <span className="pill pill-ok">worker</span>
-                  ) : (
-                    <span className="pill">not a worker</span>
-                  )}
-                </div>
-                <p className="muted">{user.email}</p>
-                <p className="meta">
-                  {user.emailVerified ? 'email verified' : 'email unverified'}
-                  {user.worker?.legalName ? ` · ${user.worker.legalName}` : ''}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <ul className="list">
-          {tasks.map((task) => (
-            <li key={task.id} className="card">
-              <Link href={`/tasks/${task.id}`} className="card-link">
-                <div className="card-top">
-                  <strong>{task.title}</strong>
-                  <span className="pill">{task.status}</span>
-                </div>
-                <p className="muted clamp">{task.description}</p>
-                <p className="meta">
-                  {task.category}
-                  {task.poster?.email ? ` · ${task.poster.email}` : ''}
-                  {task.hidden ? ' · hidden' : ''}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      {mode === 'users' && users.length > 0 ? (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Verified</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <Link href={`/users/${user.id}`} className="table-link">
+                      {displayName(user)}
+                    </Link>
+                  </td>
+                  <td>{user.email}</td>
+                  <td>
+                    {isWorkerUser(user) ? (
+                      <span className="pill pill-ok">worker</span>
+                    ) : (
+                      <span className="pill">not a worker</span>
+                    )}
+                  </td>
+                  <td>
+                    {user.emailVerified ? 'Email' : 'Email unverified'}
+                    {user.phoneVerified ? ' · Phone' : ''}
+                  </td>
+                  <td>
+                    {user.disabled ? (
+                      <span className="pill pill-warn">disabled</span>
+                    ) : (
+                      <span className="pill pill-ok">active</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : mode === 'tasks' && tasks.length > 0 ? (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Category</th>
+                <th>Poster</th>
+                <th>Budget</th>
+                <th>Visibility</th>
+                <th>Views</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={task.id}>
+                  <td>
+                    <Link href={`/tasks/${task.id}`} className="table-link">
+                      {task.title}
+                    </Link>
+                  </td>
+                  <td>
+                    <span className="pill">{task.status}</span>
+                  </td>
+                  <td>{task.category}</td>
+                  <td>
+                    {task.poster ? displayName(task.poster) : '—'}
+                    {task.poster?.email ? (
+                      <span className="meta"> · {task.poster.email}</span>
+                    ) : null}
+                  </td>
+                  <td>
+                    {formatMoney(task.budget?.amount, task.budget?.currency)}
+                  </td>
+                  <td>
+                    {task.hidden ? (
+                      <span className="pill pill-warn">hidden</span>
+                    ) : (
+                      <span className="pill">public</span>
+                    )}
+                  </td>
+                  <td>{task.views}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       {!busy && mode === 'tasks' && tasks.length === 0 ? (
         <p className="muted">No tasks found.</p>
