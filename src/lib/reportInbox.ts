@@ -17,7 +17,6 @@ import {
 } from '@/lib/graphqlErrors'
 import {
   filterReportsByTargetType,
-  MAX_REPORT_PAGES,
   reportFromApi,
   sortReportsOpenFirst,
   toAdminReportsVariables,
@@ -102,34 +101,23 @@ async function queryReportsAllowlist(variables: {
   }
 }
 
-async function drainPages(
+async function fetchOnePage(
   fetchPage: (after?: string) => Promise<ReportPage>,
   after?: string | null,
 ): Promise<ReportPage> {
-  const items: ReportRow[] = []
-  let cursor = after ?? undefined
-  let nextCursor: string | null = null
-
-  for (let i = 0; i < MAX_REPORT_PAGES; i++) {
-    const page = await fetchPage(cursor)
-    items.push(...page.items)
-    nextCursor = page.nextCursor ?? null
-    if (!nextCursor) break
-    cursor = nextCursor
-  }
-
-  return { items, nextCursor }
+  return fetchPage(after ?? undefined)
 }
 
 export async function listAdminReports(input: {
   status: ReportStatusFilter
   targetType: ReportTargetTypeFilter
   after?: string | null
+  first?: number
 }): Promise<ReportListResult> {
   const base = toAdminReportsVariables(input)
 
   try {
-    const page = await drainPages(
+    const page = await fetchOnePage(
       (after) => queryAdminReportsRich({ ...base, after }),
       input.after,
     )
@@ -144,7 +132,7 @@ export async function listAdminReports(input: {
   }
 
   try {
-    const page = await drainPages(
+    const page = await fetchOnePage(
       (after) => queryAdminReportsCore({ ...base, after }),
       input.after,
     )
@@ -165,7 +153,7 @@ export async function listAdminReports(input: {
       first: base.first,
       after: base.after,
     }
-    const page = await drainPages(
+    const page = await fetchOnePage(
       (after) => queryReportsAllowlist({ ...allowlistVars, after }),
       input.after,
     )

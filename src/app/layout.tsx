@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   title: 'Slashie Admin',
   description: 'Private Slashie ops admin — dashboard, tasks, users, reports, feedback.',
   robots: { index: false, follow: false },
+  icons: {
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+    apple: '/images/slashie-mark.svg',
+  },
 }
 
 export const viewport: Viewport = {

@@ -6,11 +6,13 @@ import {
   createdAtMs,
   feedbackFromApi,
   feedbackMailto,
+  applyFeedbackClientFilters,
   feedbackPath,
   feedbackPreview,
   mergeFeedbackRow,
   parseFeedbackCategoryFilter,
   parseFeedbackId,
+  parseFeedbackRatingFilter,
   parseFeedbackStatusFilter,
   ratingLabel,
   sortFeedbacksOpenFirst,
@@ -224,6 +226,61 @@ describe('feedbackPath', () => {
     expect(
       feedbackPath({ status: 'OPEN', category: 'BUG', id: 'f9' }),
     ).toBe('/feedback?status=OPEN&category=BUG&id=f9')
+  })
+
+  it('composes email, rating, text, dates, and cursor', () => {
+    expect(
+      feedbackPath({
+        email: 'pat@x.com',
+        rating: 4,
+        q: 'dark mode',
+        from: '2026-09-01',
+        after: 'c1',
+        first: 25,
+      }),
+    ).toBe(
+      '/feedback?email=pat%40x.com&rating=4&q=dark+mode&from=2026-09-01&after=c1&first=25',
+    )
+  })
+})
+
+describe('parseFeedbackRatingFilter', () => {
+  it('accepts 1–5 and defaults to all', () => {
+    expect(parseFeedbackRatingFilter('4')).toBe(4)
+    expect(parseFeedbackRatingFilter('nope')).toBe('ALL')
+  })
+})
+
+describe('applyFeedbackClientFilters', () => {
+  it('filters the current API page by email, rating, text, and date', () => {
+    const rows = [
+      feedback({
+        id: '1',
+        email: 'pat@x.com',
+        rating: 4,
+        message: 'Dark mode please',
+        createdAt: '2026-09-18T00:00:00.000Z',
+      }),
+      feedback({
+        id: '2',
+        email: 'sam@x.com',
+        rating: 1,
+        message: 'Map pins overlap',
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ]
+    expect(
+      applyFeedbackClientFilters(rows, { email: 'sam' }).map((row) => row.id),
+    ).toEqual(['2'])
+    expect(
+      applyFeedbackClientFilters(rows, { rating: 4 }).map((row) => row.id),
+    ).toEqual(['1'])
+    expect(
+      applyFeedbackClientFilters(rows, { q: 'pins' }).map((row) => row.id),
+    ).toEqual(['2'])
+    expect(
+      applyFeedbackClientFilters(rows, { from: '2026-09-01' }).map((row) => row.id),
+    ).toEqual(['1'])
   })
 })
 

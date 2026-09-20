@@ -762,7 +762,7 @@ export type MeQuery = { me: { id: string, email: string, emailVerified: boolean,
 
 export type UserAdminFieldsFragment = { id: string, email: string, emailVerified: boolean, phoneVerified?: boolean | null, createdAt?: any | null, disabled: boolean, profile?: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null, bio?: string | null } | null, worker?: { id: string, userId?: string | null, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification?: IdentityVerificationStatus | null, skills?: Array<string> | null, phoneVerified?: boolean | null, emailVerified?: boolean | null, memberSince?: any | null, serviceAreaLabel?: string | null, profile?: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null } | null, ratingSummary?: { average?: number | null, count: number } | null } | null };
 
-export type TaskListFieldsFragment = { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null };
+export type TaskListFieldsFragment = { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null, datetime?: { date?: string | null, type: TaskDateTimeType } | null };
 
 export type TaskDossierFieldsFragment = { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified?: boolean | null, createdAt?: any | null, profile?: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null, bio?: string | null } | null, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile?: { name?: string | null } | null } | null } | null, quotes?: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt?: any | null, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile?: { name?: string | null } | null } | null } | null }> | null, orders?: Array<{ id: string, status: OrderStatus, createdAt?: any | null, workerUserId?: string | null, customerUserId?: string | null, quoteId?: string | null, agreedPrice?: { amount: number, currency: Currency } | null }> | null, timeline?: Array<{ type: TaskTimelineEventType, timestamp: any, actor: { id: string, email: string, profile?: { name?: string | null } | null } }> | null };
 
@@ -776,7 +776,7 @@ export type AdminTasksQueryVariables = Exact<{
 }>;
 
 
-export type AdminTasksQuery = { adminTasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null }> };
+export type AdminTasksQuery = { adminTasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null, datetime?: { date?: string | null, type: TaskDateTimeType } | null }> };
 
 export type AdminTaskQueryVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -833,7 +833,7 @@ export type AdminUpdateTaskMutationVariables = Exact<{
 }>;
 
 
-export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null } };
+export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null, datetime?: { date?: string | null, type: TaskDateTimeType } | null } };
 
 export type AdminUpdateUserMutationVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -986,7 +986,7 @@ export type TasksQueryVariables = Exact<{
 }>;
 
 
-export type TasksQuery = { tasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null }> };
+export type TasksQuery = { tasks: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null, datetime?: { date?: string | null, type: TaskDateTimeType } | null }> };
 
 export type TaskQueryVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -1000,7 +1000,7 @@ export type TaskCoreQueryVariables = Exact<{
 }>;
 
 
-export type TaskCoreQuery = { task?: { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null } | null };
+export type TaskCoreQuery = { task?: { id: string, title: string, description: string, category: string, status: TaskStatus, views?: number | null, hidden?: boolean | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile?: { name?: string | null, avatarUrl?: string | null } | null } | null, datetime?: { date?: string | null, type: TaskDateTimeType } | null } | null };
 
 export type WorkersQueryVariables = Exact<{
   filter?: InputMaybe<WorkerFilter>;

@@ -34,11 +34,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </a>
         <Header />
         <main id="main-content" className="main" tabIndex={-1}>
-          <p className="muted">Checking admin session…</p>
-          <div className="kpi-grid" aria-hidden>
-            <div className="metric skeleton-card" />
-            <div className="metric skeleton-card" />
-            <div className="metric skeleton-card" />
+          <div className="content">
+            <p className="muted">Checking admin session…</p>
+            <div className="kpi-grid" aria-hidden>
+              <div className="metric skeleton-card" />
+              <div className="metric skeleton-card" />
+              <div className="metric skeleton-card" />
+            </div>
           </div>
         </main>
       </div>
@@ -53,7 +55,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </a>
         <Header />
         <main id="main-content" className="main" tabIndex={-1}>
-          <p className="muted">Redirecting to sign in…</p>
+          <div className="content">
+            <p className="muted">Redirecting to sign in…</p>
+          </div>
         </main>
       </div>
     )
@@ -68,7 +72,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <div className="app-body">
         <SideNav />
         <main id="main-content" className="main" tabIndex={-1}>
-          {children}
+          <div className="content">{children}</div>
         </main>
       </div>
     </div>

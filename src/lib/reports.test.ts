@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  applyReportClientFilters,
   filterReportsByTargetType,
   mergeReportRow,
+  parseReportReasonFilter,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
   reporterHref,
@@ -234,5 +236,54 @@ describe('reportsPath', () => {
     expect(reportsPath({ status: 'OPEN', targetType: 'ALL' })).toBe(
       '/reports?status=OPEN&targetType=ALL',
     )
+  })
+
+  it('composes reason, reporter, dates, and cursor', () => {
+    expect(
+      reportsPath({
+        reason: 'SCAM',
+        reporter: 'pat@x.com',
+        from: '2026-09-01',
+        after: 'c2',
+        first: 25,
+      }),
+    ).toBe(
+      '/reports?reason=SCAM&reporter=pat%40x.com&from=2026-09-01&after=c2&first=25',
+    )
+  })
+})
+
+describe('parseReportReasonFilter', () => {
+  it('accepts known reasons', () => {
+    expect(parseReportReasonFilter('SCAM')).toBe('SCAM')
+    expect(parseReportReasonFilter('nope')).toBe('ALL')
+  })
+})
+
+describe('applyReportClientFilters', () => {
+  it('filters the current API page by reason, reporter, and date', () => {
+    const rows = [
+      report({
+        id: '1',
+        reason: 'SCAM',
+        reporterEmail: 'pat@x.com',
+        createdAt: '2026-09-18T00:00:00.000Z',
+      }),
+      report({
+        id: '2',
+        reason: 'SPAM',
+        reporterUserId: 'u9',
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ]
+    expect(
+      applyReportClientFilters(rows, { reason: 'SCAM' }).map((row) => row.id),
+    ).toEqual(['1'])
+    expect(
+      applyReportClientFilters(rows, { reporter: 'pat' }).map((row) => row.id),
+    ).toEqual(['1'])
+    expect(
+      applyReportClientFilters(rows, { from: '2026-09-01' }).map((row) => row.id),
+    ).toEqual(['1'])
   })
 })

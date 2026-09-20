@@ -33,6 +33,7 @@ export const FEEDBACK_CATEGORY_LABELS: Record<FeedbackCategory, string> = {
 
 export type FeedbackStatusFilter = FeedbackStatus | 'ALL'
 export type FeedbackCategoryFilter = FeedbackCategory | 'ALL'
+export type FeedbackRatingFilter = 1 | 2 | 3 | 4 | 5 | 'ALL'
 
 export type FeedbackRow = {
   id: string
@@ -133,6 +134,19 @@ export function parseFeedbackId(
 ): string | null {
   const id = value?.trim()
   return id ? id : null
+}
+
+export function parseFeedbackRatingFilter(
+  value: string | null | undefined,
+): FeedbackRatingFilter {
+  if (value === '1' || value === '2' || value === '3' || value === '4' || value === '5') {
+    return Number(value) as 1 | 2 | 3 | 4 | 5
+  }
+  return 'ALL'
+}
+
+export function parseFeedbackQuery(value: string | null | undefined): string {
+  return value?.trim() ?? ''
 }
 
 export function toAdminFeedbacksVariables(input: {
@@ -240,6 +254,15 @@ export function feedbackPath(input: {
   status?: FeedbackStatusFilter
   category?: FeedbackCategoryFilter
   id?: string | null
+  email?: string
+  rating?: FeedbackRatingFilter
+  q?: string
+  from?: string
+  to?: string
+  after?: string | null
+  first?: number
+  sort?: string
+  dir?: 'asc' | 'desc'
 }): string {
   const params = new URLSearchParams()
   if (input.status && input.status !== 'ALL') params.set('status', input.status)
@@ -248,8 +271,73 @@ export function feedbackPath(input: {
   }
   const id = input.id?.trim()
   if (id) params.set('id', id)
+  const email = input.email?.trim()
+  if (email) params.set('email', email)
+  if (input.rating && input.rating !== 'ALL') params.set('rating', String(input.rating))
+  const q = input.q?.trim()
+  if (q) params.set('q', q)
+  if (input.from) params.set('from', input.from)
+  if (input.to) params.set('to', input.to)
+  const after = input.after?.trim()
+  if (after) params.set('after', after)
+  if (input.first && input.first !== FEEDBACK_PAGE_SIZE) {
+    params.set('first', String(input.first))
+  }
+  if (input.sort && input.sort !== 'createdAt') params.set('sort', input.sort)
+  if (input.dir && input.dir !== 'desc') params.set('dir', input.dir)
   const qs = params.toString()
   return qs ? `/feedback?${qs}` : '/feedback'
+}
+
+export function applyFeedbackClientFilters(
+  rows: FeedbackRow[],
+  input: {
+    email?: string
+    rating?: FeedbackRatingFilter
+    q?: string
+    from?: string
+    to?: string
+  },
+): FeedbackRow[] {
+  const email = input.email?.trim().toLowerCase() ?? ''
+  const q = input.q?.trim().toLowerCase() ?? ''
+  const from = input.from?.trim() ?? ''
+  const to = input.to?.trim() ?? ''
+  return rows.filter((row) => {
+    if (email && !row.email.toLowerCase().includes(email)) return false
+    if (input.rating && input.rating !== 'ALL' && row.rating !== input.rating) {
+      return false
+    }
+    if (q) {
+      const hay = [row.message, row.name, row.email, row.pageUrl]
+        .map((part) => (part ?? '').toLowerCase())
+        .join(' ')
+      if (!hay.includes(q)) return false
+    }
+    const day =
+      row.createdAt == null || row.createdAt === ''
+        ? ''
+        : String(row.createdAt).slice(0, 10)
+    if (from && (!day || day < from)) return false
+    if (to && (!day || day > to)) return false
+    return true
+  })
+}
+
+export function feedbackClientFilterActive(input: {
+  email?: string
+  rating?: FeedbackRatingFilter
+  q?: string
+  from?: string
+  to?: string
+}): boolean {
+  return Boolean(
+    input.email?.trim() ||
+      (input.rating && input.rating !== 'ALL') ||
+      input.q?.trim() ||
+      input.from ||
+      input.to,
+  )
 }
 
 export function feedbackMailto(input: {

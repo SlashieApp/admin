@@ -7,6 +7,8 @@ export type AdminHomeMode = 'tasks' | 'users'
 export type AdminTaskFilter = {
   search?: string
   id?: string
+  status?: string[]
+  hidden?: boolean
 }
 
 export type AdminTaskListVariables = {

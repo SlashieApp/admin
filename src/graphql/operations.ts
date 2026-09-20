@@ -98,6 +98,10 @@ const TASK_LIST_FIELDS = gql`
         avatarUrl
       }
     }
+    datetime {
+      date
+      type
+    }
   }
 `
 

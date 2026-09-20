@@ -93,7 +93,7 @@ function HeaderNavFallback({ stacked = false }: { stacked?: boolean }) {
       <Link href="/" className="tab">
         Tasks
       </Link>
-      <Link href="/?mode=users" className="tab">
+      <Link href="/users" className="tab">
         Users
       </Link>
       <Link href="/reports" className="tab">
@@ -143,7 +143,7 @@ function HeaderNav({
         Tasks
       </Link>
       <Link
-        href="/?mode=users"
+        href="/users"
         className={usersActive ? 'tab is-active' : 'tab'}
         aria-current={usersActive ? 'page' : undefined}
         onClick={onNavigate}

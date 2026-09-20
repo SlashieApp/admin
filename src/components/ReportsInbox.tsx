@@ -1,61 +1,114 @@
 'use client'
 
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 
+import { DataTable } from '@/components/ops/DataTable'
+import { DraftFilters, FilterField, FilterToolbar } from '@/components/ops/FilterToolbar'
+import { PaginationBar } from '@/components/ops/PaginationBar'
 import { formatWhen } from '@/lib/dossier'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
+import {
+  parseCursor,
+  parseIsoDate,
+  parsePageSize,
+  parseSortDir,
+  sortBy,
+  type PageSize,
+  type SortDir,
+} from '@/lib/listQuery'
 import {
   listAdminReports,
   updateAdminReportStatus,
 } from '@/lib/reportInbox'
 import {
+  applyReportClientFilters,
   mergeReportRow,
+  parseReportQuery,
+  parseReportReasonFilter,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
+  reportClientFilterActive,
   reporterHref,
   reporterLabel,
   reportsPath,
   reportTargetHref,
+  sortReportsOpenFirst,
+  REPORT_REASONS,
   REPORT_STATUSES,
+  REPORT_TARGET_TYPES,
   taskTitle,
+  type ReportReasonFilter,
   type ReportRow,
   type ReportStatus,
   type ReportStatusFilter,
   type ReportTargetTypeFilter,
 } from '@/lib/reports'
 
-const STATUS_FILTERS: { value: ReportStatusFilter; label: string }[] = [
-  { value: 'ALL', label: 'All statuses' },
-  { value: 'OPEN', label: 'Open' },
-  { value: 'REVIEWED', label: 'Reviewed' },
-  { value: 'ACTIONED', label: 'Actioned' },
-  { value: 'DISMISSED', label: 'Dismissed' },
+type ReportsView = {
+  status: ReportStatusFilter
+  targetType: ReportTargetTypeFilter
+  reason: ReportReasonFilter
+  reporter: string
+  from: string
+  to: string
+  after: string | null
+  first: PageSize
+  sort: string
+  dir: SortDir
+}
+
+const REPORT_COLUMNS = [
+  { key: 'target', label: 'Target', sortKey: 'target' },
+  { key: 'type', label: 'Type', sortKey: 'type' },
+  { key: 'reason', label: 'Reason', sortKey: 'reason' },
+  { key: 'reporter', label: 'Reporter', sortKey: 'reporter' },
+  { key: 'status', label: 'Status', sortKey: 'status' },
+  { key: 'createdAt', label: 'Created', sortKey: 'createdAt' },
+  { key: 'details', label: 'Details' },
+  { key: 'actions', label: 'Update' },
 ]
 
-const TYPE_FILTERS: { value: ReportTargetTypeFilter; label: string }[] = [
-  { value: 'TASK', label: 'Tasks' },
-  { value: 'ALL', label: 'All types' },
-  { value: 'WORKER', label: 'Workers' },
-  { value: 'USER', label: 'Users' },
-]
+const CLIENT_FILTER_NOTE =
+  'Reason, reporter, and date filter this API page only. adminReports paginates with first/after and filters status + targetType.'
+
+function parseReportsView(params: Pick<URLSearchParams, 'get'>): ReportsView {
+  const sort = params.get('sort')?.trim() ?? ''
+  return {
+    status: parseReportStatusFilter(params.get('status')),
+    targetType: parseReportTargetTypeFilter(params.get('targetType')),
+    reason: parseReportReasonFilter(params.get('reason')),
+    reporter: parseReportQuery(params.get('reporter')),
+    from: parseIsoDate(params.get('from')),
+    to: parseIsoDate(params.get('to')),
+    after: parseCursor(params.get('after')),
+    first: parsePageSize(params.get('first'), 50),
+    sort: ['target', 'type', 'reason', 'reporter', 'status', 'createdAt'].includes(
+      sort,
+    )
+      ? sort
+      : 'createdAt',
+    dir: parseSortDir(params.get('dir') ?? 'desc'),
+  }
+}
 
 export function ReportsInbox() {
   const params = useSearchParams()
-  const status = parseReportStatusFilter(params.get('status'))
-  const targetType = parseReportTargetTypeFilter(params.get('targetType'))
-  return <ReportsPanel key={`${status}:${targetType}`} status={status} targetType={targetType} />
+  const view = useMemo(() => parseReportsView(params), [params])
+  return (
+    <ReportsPanel
+      key={`${view.status}:${view.targetType}:${view.first}`}
+      view={view}
+    />
+  )
 }
 
-function ReportsPanel({
-  status,
-  targetType,
-}: {
-  status: ReportStatusFilter
-  targetType: ReportTargetTypeFilter
-}) {
+function ReportsPanel({ view }: { view: ReportsView }) {
+  const router = useRouter()
   const [rows, setRows] = useState<ReportRow[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [cursorStack, setCursorStack] = useState<string[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
@@ -69,9 +122,15 @@ function ReportsPanel({
       setError(null)
       setBanner(null)
       try {
-        const result = await listAdminReports({ status, targetType })
+        const result = await listAdminReports({
+          status: view.status,
+          targetType: view.targetType,
+          after: view.after,
+          first: view.first,
+        })
         if (cancelled) return
         setRows(result.items)
+        setNextCursor(result.nextCursor)
         setBanner(result.banner)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
@@ -83,7 +142,48 @@ function ReportsPanel({
     return () => {
       cancelled = true
     }
-  }, [status, targetType])
+  }, [view.status, view.targetType, view.after, view.first])
+
+  const visible = useMemo(() => {
+    const filtered = applyReportClientFilters(rows, view)
+    const base =
+      view.status === 'ALL' ? sortReportsOpenFirst(filtered) : filtered
+    if (view.sort === 'createdAt' && view.status === 'ALL') return base
+    return sortBy(base, view.dir, (row) => {
+      switch (view.sort) {
+        case 'target':
+          return taskTitle(row)
+        case 'type':
+          return row.targetType
+        case 'reason':
+          return row.reason
+        case 'reporter':
+          return reporterLabel(row)
+        case 'status':
+          return row.status
+        default:
+          return String(row.createdAt ?? '')
+      }
+    })
+  }, [rows, view])
+
+  function go(next: ReportsView, replaceStack = false) {
+    if (replaceStack) setCursorStack([])
+    router.replace(
+      reportsPath({
+        status: next.status,
+        targetType: next.targetType,
+        reason: next.reason,
+        reporter: next.reporter,
+        from: next.from,
+        to: next.to,
+        after: next.after,
+        first: next.first,
+        sort: next.sort,
+        dir: next.dir,
+      }),
+    )
+  }
 
   async function onStatusChange(id: string, next: ReportStatus) {
     setUpdatingId(id)
@@ -108,137 +208,193 @@ function ReportsPanel({
         <h1>Reports</h1>
         <p className="muted">
           Ops inbox for reported marketplace content. Default view is task
-          reports, all statuses, with open items first.
+          reports, all statuses, with open items first on the current page.
         </p>
       </div>
 
-      <div className="filter-block">
-        <p className="filter-label" id="report-status-filter">
-          Status
-        </p>
-        <nav className="tabs" aria-labelledby="report-status-filter">
-          {STATUS_FILTERS.map((row) => (
-            <Link
-              key={row.value}
-              href={reportsPath({ status: row.value, targetType })}
-              className={status === row.value ? 'tab is-active' : 'tab'}
-              aria-current={status === row.value ? 'page' : undefined}
-            >
-              {row.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="filter-block">
-        <p className="filter-label" id="report-type-filter">
-          Target type
-        </p>
-        <nav className="tabs" aria-labelledby="report-type-filter">
-          {TYPE_FILTERS.map((row) => (
-            <Link
-              key={row.value}
-              href={reportsPath({ status, targetType: row.value })}
-              className={targetType === row.value ? 'tab is-active' : 'tab'}
-              aria-current={targetType === row.value ? 'page' : undefined}
-            >
-              {row.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
+      <DraftFilters key={reportsPath({ ...view, after: null })} value={view}>
+        {(draft, setDraft) => (
+      <FilterToolbar
+        onSubmit={(event) => {
+          event.preventDefault()
+          go({ ...draft, after: null }, true)
+        }}
+        onClearHref="/reports"
+        busy={busy}
+        note={CLIENT_FILTER_NOTE}
+      >
+        <FilterField label="Status">
+          <select
+            className="input"
+            value={draft.status}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                status: parseReportStatusFilter(e.target.value),
+              })
+            }
+          >
+            <option value="ALL">All statuses</option>
+            {REPORT_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Target">
+          <select
+            className="input"
+            value={draft.targetType}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                targetType: parseReportTargetTypeFilter(e.target.value),
+              })
+            }
+          >
+            {REPORT_TARGET_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+            <option value="ALL">ALL</option>
+          </select>
+        </FilterField>
+        <FilterField label="Reason">
+          <select
+            className="input"
+            value={draft.reason}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                reason: parseReportReasonFilter(e.target.value),
+              })
+            }
+          >
+            <option value="ALL">All reasons</option>
+            {REPORT_REASONS.map((reason) => (
+              <option key={reason} value={reason}>
+                {reason}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Reporter">
+          <input
+            className="input"
+            value={draft.reporter}
+            onChange={(e) => setDraft({ ...draft, reporter: e.target.value })}
+            placeholder="Name, email, or id"
+          />
+        </FilterField>
+        <FilterField label="From">
+          <input
+            className="input"
+            type="date"
+            value={draft.from}
+            onChange={(e) => setDraft({ ...draft, from: e.target.value })}
+          />
+        </FilterField>
+        <FilterField label="To">
+          <input
+            className="input"
+            type="date"
+            value={draft.to}
+            onChange={(e) => setDraft({ ...draft, to: e.target.value })}
+          />
+        </FilterField>
+      </FilterToolbar>
+        )}
+      </DraftFilters>
 
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
       {updateError ? <p className="banner banner-error">{updateError}</p> : null}
       {busy ? <p className="muted">Loading reports…</p> : null}
 
-      {!busy && !error && rows.length === 0 ? (
-        <p className="muted">No reports for this filter.</p>
-      ) : null}
-
-      <ul className="list">
-        {rows.map((row) => {
-          const href = reportTargetHref(row)
-          const reporter = reporterHref(row)
-          const updating = updatingId === row.id
-          return (
-            <li key={row.id} className="card card-pad report-card">
-              <div className="card-top">
-                {href ? (
-                  <Link href={href} className="inline-link">
-                    {taskTitle(row)}
-                  </Link>
-                ) : (
-                  <strong>{taskTitle(row)}</strong>
-                )}
+      {!busy && !error ? (
+        <DataTable
+          caption="Reports"
+          columns={REPORT_COLUMNS}
+          rows={visible}
+          sort={view.sort}
+          dir={view.dir}
+          onSort={(sort, dir) => go({ ...view, sort, dir })}
+          empty="No reports for this filter."
+          render={(row, key) => {
+            if (key === 'target') {
+              const href = reportTargetHref(row)
+              return href ? (
+                <Link href={href} className="table-link">
+                  {taskTitle(row)}
+                </Link>
+              ) : (
+                <strong>{taskTitle(row)}</strong>
+              )
+            }
+            if (key === 'type') return row.targetType
+            if (key === 'reason') return row.reason
+            if (key === 'reporter') {
+              const reporter = reporterHref(row)
+              return reporter ? (
+                <Link href={reporter} className="inline-link">
+                  {reporterLabel(row)}
+                </Link>
+              ) : (
+                reporterLabel(row)
+              )
+            }
+            if (key === 'status') {
+              return (
                 <span className={row.status === 'OPEN' ? 'pill pill-warn' : 'pill'}>
                   {row.status}
                 </span>
-              </div>
-              <dl className="kv report-kv">
-                <div>
-                  <dt>Reason</dt>
-                  <dd>{row.reason}</dd>
-                </div>
-                <div>
-                  <dt>Type</dt>
-                  <dd>{row.targetType}</dd>
-                </div>
-                <div>
-                  <dt>Reporter</dt>
-                  <dd>
-                    {reporter ? (
-                      <Link href={reporter} className="inline-link">
-                        {reporterLabel(row)}
-                      </Link>
-                    ) : (
-                      reporterLabel(row)
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{formatWhen(row.createdAt)}</dd>
-                </div>
-              </dl>
-              {row.targetUrl ? (
-                <p className="meta">
-                  Target URL:{' '}
-                  <a
-                    className="inline-link"
-                    href={row.targetUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {row.targetUrl}
-                  </a>
-                </p>
-              ) : null}
-              {row.details ? <p>{row.details}</p> : null}
-              <label className="field">
-                Update status
-                <select
-                  className="input"
-                  value={row.status}
-                  disabled={updating}
-                  aria-label={`Update status for ${taskTitle(row)}`}
-                  onChange={(event) =>
-                    void onStatusChange(row.id, event.target.value as ReportStatus)
-                  }
-                >
-                  {REPORT_STATUSES.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {updating ? <p className="meta">Saving…</p> : null}
-            </li>
-          )
-        })}
-      </ul>
+              )
+            }
+            if (key === 'createdAt') return formatWhen(row.createdAt)
+            if (key === 'details') return row.details || '—'
+            const updating = updatingId === row.id
+            return (
+              <select
+                className="input table-select"
+                value={row.status}
+                disabled={updating}
+                aria-label={`Update status for ${taskTitle(row)}`}
+                onChange={(event) =>
+                  void onStatusChange(row.id, event.target.value as ReportStatus)
+                }
+              >
+                {REPORT_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            )
+          }}
+        />
+      ) : null}
+
+      <PaginationBar
+        shownCount={visible.length}
+        fetchedCount={rows.length}
+        pageSize={view.first}
+        filtered={reportClientFilterActive(view)}
+        onPageSize={(first: PageSize) => go({ ...view, first, after: null }, true)}
+        canPrev={Boolean(view.after)}
+        canNext={Boolean(nextCursor)}
+        onPrev={() => {
+          const prev = cursorStack[cursorStack.length - 1]
+          setCursorStack((stack) => stack.slice(0, -1))
+          go({ ...view, after: prev || null })
+        }}
+        onNext={() => {
+          if (!nextCursor) return
+          setCursorStack((stack) => [...stack, view.after ?? ''])
+          go({ ...view, after: nextCursor })
+        }}
+      />
     </section>
   )
 }

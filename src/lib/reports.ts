@@ -26,6 +26,15 @@ export const REPORT_TARGET_TYPES: ReportTargetType[] = [
 
 export type ReportStatusFilter = ReportStatus | 'ALL'
 export type ReportTargetTypeFilter = ReportTargetType | 'ALL'
+export type ReportReasonFilter = ReportReason | 'ALL'
+
+export const REPORT_REASONS: ReportReason[] = [
+  'SPAM',
+  'HARASSMENT',
+  'ILLEGAL_OR_PROHIBITED',
+  'SCAM',
+  'OTHER',
+]
 
 export type ReportRow = {
   id: string
@@ -104,6 +113,25 @@ export function parseReportTargetTypeFilter(
 ): ReportTargetTypeFilter {
   if (value === 'ALL' || value === 'WORKER' || value === 'USER') return value
   return 'TASK'
+}
+
+export function parseReportReasonFilter(
+  value: string | null | undefined,
+): ReportReasonFilter {
+  if (
+    value === 'SPAM' ||
+    value === 'HARASSMENT' ||
+    value === 'ILLEGAL_OR_PROHIBITED' ||
+    value === 'SCAM' ||
+    value === 'OTHER'
+  ) {
+    return value
+  }
+  return 'ALL'
+}
+
+export function parseReportQuery(value: string | null | undefined): string {
+  return value?.trim() ?? ''
 }
 
 export function toAdminReportsVariables(input: {
@@ -215,12 +243,83 @@ export function mergeReportRow(
 export function reportsPath(input: {
   status?: ReportStatusFilter
   targetType?: ReportTargetTypeFilter
+  reason?: ReportReasonFilter
+  reporter?: string
+  from?: string
+  to?: string
+  after?: string | null
+  first?: number
+  sort?: string
+  dir?: 'asc' | 'desc'
 }): string {
   const params = new URLSearchParams()
   if (input.status && input.status !== 'ALL') params.set('status', input.status)
   if (input.targetType && input.targetType !== 'TASK') {
     params.set('targetType', input.targetType)
   }
+  if (input.reason && input.reason !== 'ALL') params.set('reason', input.reason)
+  const reporter = input.reporter?.trim()
+  if (reporter) params.set('reporter', reporter)
+  if (input.from) params.set('from', input.from)
+  if (input.to) params.set('to', input.to)
+  const after = input.after?.trim()
+  if (after) params.set('after', after)
+  if (input.first && input.first !== REPORT_PAGE_SIZE) {
+    params.set('first', String(input.first))
+  }
+  if (input.sort && input.sort !== 'createdAt') params.set('sort', input.sort)
+  if (input.dir && input.dir !== 'desc') params.set('dir', input.dir)
   const qs = params.toString()
   return qs ? `/reports?${qs}` : '/reports'
+}
+
+export function applyReportClientFilters(
+  rows: ReportRow[],
+  input: {
+    reason?: ReportReasonFilter
+    reporter?: string
+    from?: string
+    to?: string
+  },
+): ReportRow[] {
+  const reporter = input.reporter?.trim().toLowerCase() ?? ''
+  const from = input.from?.trim() ?? ''
+  const to = input.to?.trim() ?? ''
+  return rows.filter((row) => {
+    if (input.reason && input.reason !== 'ALL' && row.reason !== input.reason) {
+      return false
+    }
+    if (reporter) {
+      const hay = [
+        row.reporter?.profile?.name,
+        row.reporter?.email,
+        row.reporterEmail,
+        row.reporterUserId,
+      ]
+        .map((part) => (part ?? '').toLowerCase())
+        .join(' ')
+      if (!hay.includes(reporter)) return false
+    }
+    const day =
+      row.createdAt == null || row.createdAt === ''
+        ? ''
+        : String(row.createdAt).slice(0, 10)
+    if (from && (!day || day < from)) return false
+    if (to && (!day || day > to)) return false
+    return true
+  })
+}
+
+export function reportClientFilterActive(input: {
+  reason?: ReportReasonFilter
+  reporter?: string
+  from?: string
+  to?: string
+}): boolean {
+  return Boolean(
+    (input.reason && input.reason !== 'ALL') ||
+      input.reporter?.trim() ||
+      input.from ||
+      input.to,
+  )
 }
