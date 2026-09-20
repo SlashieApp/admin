@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   filterReportsByTargetType,
   mergeReportRow,
+  parseReportListFilters,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
+  refineReports,
   reporterHref,
   reporterLabel,
   reportFromApi,
@@ -234,5 +236,45 @@ describe('reportsPath', () => {
     expect(reportsPath({ status: 'OPEN', targetType: 'ALL' })).toBe(
       '/reports?status=OPEN&targetType=ALL',
     )
+    expect(
+      reportsPath({
+        status: 'OPEN',
+        reason: 'SPAM',
+        reporter: 'sam',
+        after: 'c2',
+      }),
+    ).toBe('/reports?status=OPEN&reason=SPAM&reporter=sam&after=c2')
+  })
+})
+
+describe('refineReports', () => {
+  it('filters reason, reporter, and date on the current page', () => {
+    const rows = [
+      report({
+        id: '1',
+        reason: 'SPAM',
+        reporterEmail: 'sam@x.com',
+        reporterUserId: 'u1',
+      }),
+      report({
+        id: '2',
+        reason: 'SCAM',
+        reporterEmail: 'lee@x.com',
+        reporterUserId: 'u2',
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ]
+    expect(
+      refineReports(
+        rows,
+        parseReportListFilters(new URLSearchParams('reason=SPAM&reporter=sam')),
+      ).map((row) => row.id),
+    ).toEqual(['1'])
+    expect(
+      refineReports(
+        rows,
+        parseReportListFilters(new URLSearchParams('from=2026-09-01')),
+      ).map((row) => row.id),
+    ).toEqual(['1'])
   })
 })

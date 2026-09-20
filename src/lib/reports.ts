@@ -1,3 +1,17 @@
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  includesNormalized,
+  inDateRange,
+  pageLocalNotice,
+  parseDateInput,
+  parseOptionalString,
+  parsePageSize,
+  parseSortDir,
+  setParam,
+  sortRows,
+  type SortDir,
+} from '@/lib/listParams'
+
 export type ReportReason =
   | 'SPAM'
   | 'HARASSMENT'
@@ -26,6 +40,29 @@ export const REPORT_TARGET_TYPES: ReportTargetType[] = [
 
 export type ReportStatusFilter = ReportStatus | 'ALL'
 export type ReportTargetTypeFilter = ReportTargetType | 'ALL'
+
+export const REPORT_REASONS: ReportReason[] = [
+  'SPAM',
+  'HARASSMENT',
+  'ILLEGAL_OR_PROHIBITED',
+  'SCAM',
+  'OTHER',
+]
+
+export type ReportReasonFilter = ReportReason | 'ALL'
+
+export type ReportListFilters = {
+  status: ReportStatusFilter
+  targetType: ReportTargetTypeFilter
+  reason: ReportReasonFilter
+  reporter: string
+  from: string
+  to: string
+  after: string
+  first: number
+  sort: string
+  dir: SortDir
+}
 
 export type ReportRow = {
   id: string
@@ -212,14 +249,118 @@ export function mergeReportRow(
   }
 }
 
-export function reportsPath(input: {
-  status?: ReportStatusFilter
-  targetType?: ReportTargetTypeFilter
-}): string {
+export function parseReportReasonFilter(
+  value: string | null | undefined,
+): ReportReasonFilter {
+  return REPORT_REASONS.includes(value as ReportReason)
+    ? (value as ReportReason)
+    : 'ALL'
+}
+
+export function reportFiltersFromForm(
+  data: FormData,
+  current: ReportListFilters,
+): ReportListFilters {
+  return {
+    ...current,
+    status: parseReportStatusFilter(String(data.get('status') ?? '')),
+    targetType: parseReportTargetTypeFilter(String(data.get('targetType') ?? '')),
+    reason: parseReportReasonFilter(String(data.get('reason') ?? '')),
+    reporter: String(data.get('reporter') ?? '').trim(),
+    from: parseDateInput(String(data.get('from') ?? '')),
+    to: parseDateInput(String(data.get('to') ?? '')),
+    after: '',
+  }
+}
+
+export function parseReportListFilters(
+  params: Pick<URLSearchParams, 'get'>,
+): ReportListFilters {
+  return {
+    status: parseReportStatusFilter(params.get('status')),
+    targetType: parseReportTargetTypeFilter(params.get('targetType')),
+    reason: parseReportReasonFilter(params.get('reason')),
+    reporter: parseOptionalString(params.get('reporter')),
+    from: parseDateInput(params.get('from')),
+    to: parseDateInput(params.get('to')),
+    after: parseOptionalString(params.get('after')),
+    first: parsePageSize(params.get('first')),
+    sort: parseOptionalString(params.get('sort')),
+    dir: parseSortDir(params.get('dir')),
+  }
+}
+
+export function reportPageLocalFields(filters: ReportListFilters): string[] {
+  const fields: string[] = []
+  if (filters.reason !== 'ALL') fields.push('Reason')
+  if (filters.reporter) fields.push('Reporter')
+  if (filters.from || filters.to) fields.push('Created date')
+  return fields
+}
+
+export function reportPageLocalNotice(filters: ReportListFilters): string | null {
+  return pageLocalNotice(reportPageLocalFields(filters))
+}
+
+export function refineReports<T extends ReportRow>(
+  rows: T[],
+  filters: ReportListFilters,
+): T[] {
+  const filtered = rows.filter((row) => {
+    if (filters.reason !== 'ALL' && row.reason !== filters.reason) return false
+    if (filters.reporter) {
+      const blob = [
+        row.reporter?.profile?.name,
+        row.reporter?.email,
+        row.reporterEmail,
+        row.reporterUserId,
+      ]
+        .filter(Boolean)
+        .join(' ')
+      if (!includesNormalized(blob, filters.reporter)) return false
+    }
+    if (!inDateRange(row.createdAt, filters.from, filters.to)) return false
+    return true
+  })
+  return sortRows(filtered, filters.sort, filters.dir, reportSortValue)
+}
+
+export function reportSortValue(row: ReportRow, key: string): unknown {
+  switch (key) {
+    case 'target':
+      return taskTitle(row)
+    case 'status':
+      return row.status
+    case 'type':
+      return row.targetType
+    case 'reason':
+      return row.reason
+    case 'reporter':
+      return reporterLabel(row)
+    case 'created':
+      return String(row.createdAt ?? '')
+    default:
+      return ''
+  }
+}
+
+export function reportsPath(input: Partial<ReportListFilters> = {}): string {
   const params = new URLSearchParams()
   if (input.status && input.status !== 'ALL') params.set('status', input.status)
   if (input.targetType && input.targetType !== 'TASK') {
     params.set('targetType', input.targetType)
+  }
+  if (input.reason && input.reason !== 'ALL') params.set('reason', input.reason)
+  setParam(params, 'reporter', input.reporter)
+  setParam(params, 'from', input.from)
+  setParam(params, 'to', input.to)
+  setParam(params, 'after', input.after)
+  if (input.first && input.first !== DEFAULT_TABLE_PAGE_SIZE) {
+    params.set('first', String(input.first))
+  }
+  setParam(params, 'sort', input.sort)
+  if (input.sort && input.dir && input.dir !== 'desc') {
+    params.set('dir', input.dir)
   }
   const qs = params.toString()
   return qs ? `/reports?${qs}` : '/reports'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { slashieMarkSrc, slashieWordmarkSrc } from './brand'
+import { slashieFaviconSrc, slashieMarkSrc, slashieWordmarkSrc } from './brand'
 
 describe('slashieWordmarkSrc', () => {
   it('uses the white wordmark on a dark header for contrast', () => {
@@ -15,5 +15,11 @@ describe('slashieWordmarkSrc', () => {
 describe('slashieMarkSrc', () => {
   it('points at the copied green mark asset', () => {
     expect(slashieMarkSrc()).toBe('/images/slashie-mark.svg')
+  })
+})
+
+describe('slashieFaviconSrc', () => {
+  it('uses the same green mark in the browser tab', () => {
+    expect(slashieFaviconSrc()).toBe('/images/slashie-mark.svg')
   })
 })

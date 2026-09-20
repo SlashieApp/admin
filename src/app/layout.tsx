@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans } from 'next/font/google'
 
 import { AuthGate } from '@/components/AuthGate'
 import { Providers } from '@/app/providers'
+import { slashieFaviconSrc } from '@/lib/brand'
 
 import './globals.css'
 
@@ -22,6 +23,11 @@ export const metadata: Metadata = {
   title: 'Slashie Admin',
   description: 'Private Slashie ops admin — dashboard, tasks, users, reports, feedback.',
   robots: { index: false, follow: false },
+  icons: {
+    icon: [{ url: slashieFaviconSrc(), type: 'image/svg+xml' }],
+    shortcut: slashieFaviconSrc(),
+    apple: slashieFaviconSrc(),
+  },
 }
 
 export const viewport: Viewport = {

@@ -1,3 +1,18 @@
+import {
+  DEFAULT_TABLE_PAGE_SIZE,
+  includesNormalized,
+  inDateRange,
+  pageLocalNotice,
+  parseDateInput,
+  parseOptionalNumber,
+  parseOptionalString,
+  parsePageSize,
+  parseSortDir,
+  setParam,
+  sortRows,
+  type SortDir,
+} from '@/lib/listParams'
+
 export type FeedbackCategory =
   | 'BUG'
   | 'RATING'
@@ -33,6 +48,21 @@ export const FEEDBACK_CATEGORY_LABELS: Record<FeedbackCategory, string> = {
 
 export type FeedbackStatusFilter = FeedbackStatus | 'ALL'
 export type FeedbackCategoryFilter = FeedbackCategory | 'ALL'
+
+export type FeedbackListFilters = {
+  status: FeedbackStatusFilter
+  category: FeedbackCategoryFilter
+  id: string | null
+  q: string
+  email: string
+  rating: number | null
+  from: string
+  to: string
+  after: string
+  first: number
+  sort: string
+  dir: SortDir
+}
 
 export type FeedbackRow = {
   id: string
@@ -236,11 +266,100 @@ export function mergeFeedbackRow(
   }
 }
 
-export function feedbackPath(input: {
-  status?: FeedbackStatusFilter
-  category?: FeedbackCategoryFilter
-  id?: string | null
-}): string {
+export function feedbackFiltersFromForm(
+  data: FormData,
+  current: FeedbackListFilters,
+): FeedbackListFilters {
+  return {
+    ...current,
+    status: parseFeedbackStatusFilter(String(data.get('status') ?? '')),
+    category: parseFeedbackCategoryFilter(String(data.get('category') ?? '')),
+    q: String(data.get('q') ?? '').trim(),
+    email: String(data.get('email') ?? '').trim(),
+    rating: parseOptionalNumber(String(data.get('rating') ?? '')),
+    from: parseDateInput(String(data.get('from') ?? '')),
+    to: parseDateInput(String(data.get('to') ?? '')),
+    after: '',
+  }
+}
+
+export function parseFeedbackListFilters(
+  params: Pick<URLSearchParams, 'get'>,
+): FeedbackListFilters {
+  return {
+    status: parseFeedbackStatusFilter(params.get('status')),
+    category: parseFeedbackCategoryFilter(params.get('category')),
+    id: parseFeedbackId(params.get('id')),
+    q: parseOptionalString(params.get('q')),
+    email: parseOptionalString(params.get('email')),
+    rating: parseOptionalNumber(params.get('rating')),
+    from: parseDateInput(params.get('from')),
+    to: parseDateInput(params.get('to')),
+    after: parseOptionalString(params.get('after')),
+    first: parsePageSize(params.get('first')),
+    sort: parseOptionalString(params.get('sort')),
+    dir: parseSortDir(params.get('dir')),
+  }
+}
+
+export function feedbackPageLocalFields(filters: FeedbackListFilters): string[] {
+  const fields: string[] = []
+  if (filters.q) fields.push('Free text')
+  if (filters.email) fields.push('Email')
+  if (filters.rating != null) fields.push('Rating')
+  if (filters.from || filters.to) fields.push('Created date')
+  return fields
+}
+
+export function feedbackPageLocalNotice(
+  filters: FeedbackListFilters,
+): string | null {
+  return pageLocalNotice(feedbackPageLocalFields(filters))
+}
+
+export function refineFeedbacks<T extends FeedbackRow>(
+  rows: T[],
+  filters: FeedbackListFilters,
+): T[] {
+  const filtered = rows.filter((row) => {
+    if (filters.email && !includesNormalized(row.email, filters.email)) {
+      return false
+    }
+    if (filters.rating != null && row.rating !== filters.rating) return false
+    if (filters.q) {
+      const blob = [row.message, row.name, row.email, row.pageUrl]
+        .filter(Boolean)
+        .join(' ')
+      if (!includesNormalized(blob, filters.q)) return false
+    }
+    if (!inDateRange(row.createdAt, filters.from, filters.to)) return false
+    return true
+  })
+  return sortRows(filtered, filters.sort, filters.dir, feedbackSortValue)
+}
+
+export function feedbackSortValue(row: FeedbackRow, key: string): unknown {
+  switch (key) {
+    case 'submitter':
+      return submitterLabel(row)
+    case 'email':
+      return row.email
+    case 'category':
+      return row.category
+    case 'rating':
+      return row.rating ?? -1
+    case 'status':
+      return row.status
+    case 'created':
+      return String(row.createdAt ?? '')
+    default:
+      return ''
+  }
+}
+
+export function feedbackPath(
+  input: Partial<FeedbackListFilters> = {},
+): string {
   const params = new URLSearchParams()
   if (input.status && input.status !== 'ALL') params.set('status', input.status)
   if (input.category && input.category !== 'ALL') {
@@ -248,6 +367,19 @@ export function feedbackPath(input: {
   }
   const id = input.id?.trim()
   if (id) params.set('id', id)
+  setParam(params, 'q', input.q)
+  setParam(params, 'email', input.email)
+  if (input.rating != null) params.set('rating', String(input.rating))
+  setParam(params, 'from', input.from)
+  setParam(params, 'to', input.to)
+  setParam(params, 'after', input.after)
+  if (input.first && input.first !== DEFAULT_TABLE_PAGE_SIZE) {
+    params.set('first', String(input.first))
+  }
+  setParam(params, 'sort', input.sort)
+  if (input.sort && input.dir && input.dir !== 'desc') {
+    params.set('dir', input.dir)
+  }
   const qs = params.toString()
   return qs ? `/feedback?${qs}` : '/feedback'
 }

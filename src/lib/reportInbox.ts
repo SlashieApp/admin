@@ -17,7 +17,6 @@ import {
 } from '@/lib/graphqlErrors'
 import {
   filterReportsByTargetType,
-  MAX_REPORT_PAGES,
   reportFromApi,
   sortReportsOpenFirst,
   toAdminReportsVariables,
@@ -102,37 +101,16 @@ async function queryReportsAllowlist(variables: {
   }
 }
 
-async function drainPages(
-  fetchPage: (after?: string) => Promise<ReportPage>,
-  after?: string | null,
-): Promise<ReportPage> {
-  const items: ReportRow[] = []
-  let cursor = after ?? undefined
-  let nextCursor: string | null = null
-
-  for (let i = 0; i < MAX_REPORT_PAGES; i++) {
-    const page = await fetchPage(cursor)
-    items.push(...page.items)
-    nextCursor = page.nextCursor ?? null
-    if (!nextCursor) break
-    cursor = nextCursor
-  }
-
-  return { items, nextCursor }
-}
-
 export async function listAdminReports(input: {
   status: ReportStatusFilter
   targetType: ReportTargetTypeFilter
   after?: string | null
+  first?: number
 }): Promise<ReportListResult> {
   const base = toAdminReportsVariables(input)
 
   try {
-    const page = await drainPages(
-      (after) => queryAdminReportsRich({ ...base, after }),
-      input.after,
-    )
+    const page = await queryAdminReportsRich(base)
     return {
       items: decorateList(page.items, input.status),
       nextCursor: page.nextCursor ?? null,
@@ -144,10 +122,7 @@ export async function listAdminReports(input: {
   }
 
   try {
-    const page = await drainPages(
-      (after) => queryAdminReportsCore({ ...base, after }),
-      input.after,
-    )
+    const page = await queryAdminReportsCore(base)
     const enriched = await enrichReports(page.items)
     return {
       items: decorateList(enriched, input.status),
@@ -165,10 +140,7 @@ export async function listAdminReports(input: {
       first: base.first,
       after: base.after,
     }
-    const page = await drainPages(
-      (after) => queryReportsAllowlist({ ...allowlistVars, after }),
-      input.after,
-    )
+    const page = await queryReportsAllowlist(allowlistVars)
     const filtered = filterReportsByTargetType(page.items, input.targetType)
     const enriched = await enrichReports(filtered)
     return {

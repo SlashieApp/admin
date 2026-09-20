@@ -11,7 +11,6 @@ import {
 import { apolloClient } from '@/lib/apollo'
 import { graphqlErrorMessage, isMissingAdminFieldError } from '@/lib/graphqlErrors'
 import {
-  MAX_FEEDBACK_PAGES,
   feedbackFromApi,
   sortFeedbacksOpenFirst,
   toAdminFeedbacksVariables,
@@ -78,25 +77,6 @@ async function queryAdminFeedbacksCore(
   }
 }
 
-async function drainPages(
-  fetchPage: (after?: string) => Promise<FeedbackPage>,
-  after?: string | null,
-): Promise<FeedbackPage> {
-  const items: FeedbackRow[] = []
-  let cursor = after ?? undefined
-  let nextCursor: string | null = null
-
-  for (let i = 0; i < MAX_FEEDBACK_PAGES; i++) {
-    const page = await fetchPage(cursor)
-    items.push(...page.items)
-    nextCursor = page.nextCursor ?? null
-    if (!nextCursor) break
-    cursor = nextCursor
-  }
-
-  return { items, nextCursor }
-}
-
 function decorateList(
   items: FeedbackRow[],
   status: FeedbackStatusFilter,
@@ -109,14 +89,12 @@ export async function listAdminFeedbacks(input: {
   status: FeedbackStatusFilter
   category: FeedbackCategoryFilter
   after?: string | null
+  first?: number
 }): Promise<FeedbackListResult> {
   const base = toAdminFeedbacksVariables(input)
 
   try {
-    const page = await drainPages(
-      (after) => queryAdminFeedbacks({ ...base, after }),
-      input.after,
-    )
+    const page = await queryAdminFeedbacks(base)
     return {
       items: decorateList(page.items, input.status),
       nextCursor: page.nextCursor ?? null,
@@ -129,10 +107,7 @@ export async function listAdminFeedbacks(input: {
   }
 
   try {
-    const page = await drainPages(
-      (after) => queryAdminFeedbacksCore({ ...base, after }),
-      input.after,
-    )
+    const page = await queryAdminFeedbacksCore(base)
     return {
       items: decorateList(page.items, input.status),
       nextCursor: page.nextCursor ?? null,
