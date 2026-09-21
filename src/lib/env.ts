@@ -17,3 +17,14 @@ export function googleClientId(): string {
 export function isGoogleAuthConfigured(): boolean {
   return googleClientId().length > 0
 }
+
+export function mapboxAccessToken(): string {
+  return process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?.trim() ?? ''
+}
+
+export function mapboxStyleUrl(): string {
+  const custom = process.env.NEXT_PUBLIC_MAPBOX_STYLE_LIGHT?.trim()
+  return custom && custom.length > 0
+    ? custom
+    : 'mapbox://styles/mapbox/streets-v12'
+}

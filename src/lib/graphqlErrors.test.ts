@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   graphqlErrorMessage,
   isMissingAdminFieldError,
+  isUnknownFilterFieldError,
 } from './graphqlErrors'
 
 describe('isMissingAdminFieldError', () => {
@@ -29,6 +30,26 @@ describe('isMissingAdminFieldError', () => {
     ).toBe(true)
     expect(
       isMissingAdminFieldError(new Error('Not an admin')),
+    ).toBe(false)
+  })
+})
+
+describe('isUnknownFilterFieldError', () => {
+  it('detects BE-49 bbox / AdminTaskFilter fields without treating missing adminTasks as the same', () => {
+    expect(
+      isUnknownFilterFieldError(
+        new Error('Field "bbox" is not defined by type "AdminTaskFilter".'),
+      ),
+    ).toBe(true)
+    expect(
+      isUnknownFilterFieldError(
+        new Error('Unknown argument "bbox" on field "Query.adminTasks".'),
+      ),
+    ).toBe(true)
+    expect(
+      isUnknownFilterFieldError(
+        new Error('Cannot query field "adminTasks" on type "Query".'),
+      ),
     ).toBe(false)
   })
 })

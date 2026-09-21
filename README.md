@@ -2,7 +2,7 @@
 
 Private ops panel for the Slashie marketplace. Google sign-in, dashboard, auto-loaded task list, user search/management, and god-mode task edits via Apollo `@admin` APIs ([BE-42](https://linear.app/slashie/issue/BE-42), [BE-43](https://linear.app/slashie/issue/BE-43), [BE-44](https://linear.app/slashie/issue/BE-44)).
 
-Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell).
+Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links).
 
 ## Stack
 
@@ -23,7 +23,7 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks. People search is `/users` (`/?mode=users` redirects there). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Lists are filterable tables; filters live in the URL so views are shareable.
+**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters (`/?mode=users` redirects to `/users`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link.
 
 ## GraphQL
 
@@ -45,7 +45,7 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 | `adminUpdateFeedbackStatus` | `(id: ID!, status: FeedbackStatus!): Feedback!` |
 | `adminFeedbackDraftReply` | `(id: ID!): AdminFeedbackDraftReply!` |
 
-`AdminTaskFilter`: `search`, `id`, `status`, `hidden`.
+`AdminTaskFilter`: `search`, `id`, `status`, `hidden`, plus scaffolded BE-49 `bbox` (`swLat`/`swLng`/`neLat`/`neLng`). Other proposed BE-49 fields (`category`, poster, budget, created range, cursor pages) are documented on the local schema but not sent until Apollo accepts them. If `bbox` is rejected, the Tasks map shows pins for the current filter page and a banner.
 
 List UX (FE-170): Tasks / Users / Feedback / Reports use compact tables, a filter toolbar, and URL query params. Feedback and Reports page with the existing `after` cursor. `adminTasks` / `adminUsers` only expose `first` (no cursor) — the panel shows that page and does **not** invent page-2 from a truncated list. Extra filters the API cannot apply (task category/poster/budget/job date; user disabled/worker/created; feedback email/rating/free-text/date; report reason/reporter/date) refine the current server page and show a warning. Companion BE follow-up: [BE-50](https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback). Task has no `createdAt`, so the tasks date filter is job date (`datetime.date`).
 
@@ -75,6 +75,9 @@ Copy `.env.example` to `.env.local`:
 | `POSTHOG_PERSONAL_API_KEY` | for analytics | Server-only personal API key. |
 | `POSTHOG_PROJECT_ID` | for analytics | PostHog project id. |
 | `POSTHOG_HOST` | no | Defaults to `https://eu.posthog.com`. |
+| `NEXT_PUBLIC_APP_URL` | no | Public Slashie origin for live task links. Defaults to `https://slashie.app`. |
+| `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` | for Tasks map | Same Mapbox token as `SlashieApp/web`. Map shows a placeholder without it. |
+| `NEXT_PUBLIC_MAPBOX_STYLE_LIGHT` | no | Defaults to `mapbox://styles/mapbox/streets-v12`. |
 
 ## Run
 
@@ -83,6 +86,7 @@ bun install
 cp .env.example .env.local
 # fill NEXT_PUBLIC_GOOGLE_CLIENT_ID (+ GRAPHQL URL if not prod)
 # fill POSTHOG_* for dashboard / detail analytics
+# fill NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN for the Tasks pin map
 bun run codegen
 bun run dev
 ```

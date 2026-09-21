@@ -51,6 +51,7 @@ export type Scalars = {
    * See https://linear.app/slashie/issue/BE-43
    * See https://linear.app/slashie/issue/BE-46
    * See https://linear.app/slashie/issue/BE-48
+   * See https://linear.app/slashie/issue/BE-49
    */
   DateTime: { input: any; output: any; }
   JSON: { input: any; output: any; }
@@ -133,8 +134,22 @@ export type AdminTaskDossier = {
 };
 
 export type AdminTaskFilter = {
+  /**
+   * Tasks whose location falls inside this viewport. Scaffolded for FE-171;
+   * live Apollo rejects the field until BE-49 ships bbox.
+   */
+  bbox?: InputMaybe<GeoBBox>;
+  budgetMax?: InputMaybe<Scalars['Float']['input']>;
+  budgetMin?: InputMaybe<Scalars['Float']['input']>;
+  budgetType?: InputMaybe<TaskBudgetType>;
+  /** BE-49 proposed; not sent until the live schema accepts it. */
+  category?: InputMaybe<Scalars['String']['input']>;
+  createdAfter?: InputMaybe<Scalars['DateTime']['input']>;
+  createdBefore?: InputMaybe<Scalars['DateTime']['input']>;
   hidden?: InputMaybe<Scalars['Boolean']['input']>;
   id?: InputMaybe<Scalars['ID']['input']>;
+  posterId?: InputMaybe<Scalars['ID']['input']>;
+  posterSearch?: InputMaybe<Scalars['String']['input']>;
   search?: InputMaybe<Scalars['String']['input']>;
   status?: InputMaybe<Array<TaskStatus>>;
 };
@@ -211,6 +226,14 @@ export enum FeedbackStatus {
   Replied = 'REPLIED',
   Reviewed = 'REVIEWED'
 }
+
+/** Visible map viewport for ops area browse (BE-49). */
+export type GeoBBox = {
+  neLat: Scalars['Float']['input'];
+  neLng: Scalars['Float']['input'];
+  swLat: Scalars['Float']['input'];
+  swLng: Scalars['Float']['input'];
+};
 
 export enum IdentityVerificationStatus {
   NotStarted = 'NOT_STARTED',

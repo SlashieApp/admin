@@ -1,4 +1,9 @@
 import {
+  bboxToParam,
+  parseBBoxParam,
+  type GeoBBox,
+} from '@/lib/geo'
+import {
   DEFAULT_TABLE_PAGE_SIZE,
   includesNormalized,
   inDateRange,
@@ -62,6 +67,7 @@ export type TaskListFilters = {
   budgetType: TaskBudgetTypeFilter
   from: string
   to: string
+  bbox: GeoBBox | null
   first: number
   sort: string
   dir: SortDir
@@ -98,10 +104,29 @@ const EMPTY_FILTERS: TaskListFilters = {
   budgetType: 'ALL',
   from: '',
   to: '',
+  bbox: null,
   first: DEFAULT_TABLE_PAGE_SIZE,
   sort: '',
   dir: 'desc',
 }
+
+/** Session flag: bbox is not on the pointed-at Apollo (BE-49). */
+let bboxFilterUnsupported = false
+
+export function markBBoxFilterUnsupported(): void {
+  bboxFilterUnsupported = true
+}
+
+export function isBBoxFilterUnsupported(): boolean {
+  return bboxFilterUnsupported
+}
+
+export function resetBBoxFilterSupportForTests(): void {
+  bboxFilterUnsupported = false
+}
+
+export const BBOX_UNSUPPORTED_NOTICE =
+  'Map area (bbox) is not on this Apollo yet. Pins show this filter page; pan/zoom will not load a new area until bbox ships.'
 
 export function parseTaskStatusFilter(
   value: string | null | undefined,
@@ -159,6 +184,7 @@ export function parseTaskListFilters(
     budgetType: parseTaskBudgetTypeFilter(params.get('budgetType')),
     from: parseDateInput(params.get('from')),
     to: parseDateInput(params.get('to')),
+    bbox: parseBBoxParam(params.get('bbox')),
     first: parsePageSize(params.get('first')),
     sort: parseOptionalString(params.get('sort')),
     dir: parseSortDir(params.get('dir')),
@@ -178,6 +204,7 @@ export function toTaskListQueryVariables(
   if (filters.status !== 'ALL') extras.status = [filters.status]
   if (filters.visibility === 'hidden') extras.hidden = true
   if (filters.visibility === 'public') extras.hidden = false
+  if (filters.bbox && !bboxFilterUnsupported) extras.bbox = filters.bbox
   if (Object.keys(extras).length === 0) return { first: vars.first }
   return { first: vars.first, filter: extras }
 }
@@ -278,6 +305,7 @@ export function taskListPath(
   if (next.budgetType !== 'ALL') params.set('budgetType', next.budgetType)
   setParam(params, 'from', next.from)
   setParam(params, 'to', next.to)
+  if (next.bbox) setParam(params, 'bbox', bboxToParam(next.bbox))
   if (next.first !== DEFAULT_TABLE_PAGE_SIZE) {
     params.set('first', String(next.first))
   }

@@ -1,14 +1,20 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  markBBoxFilterUnsupported,
   parseTaskListFilters,
   refineTasks,
+  resetBBoxFilterSupportForTests,
   taskFiltersFromForm,
   taskListPath,
   taskPageLocalFields,
   toTaskListQueryVariables,
   type TaskListRow,
 } from './taskList'
+
+beforeEach(() => {
+  resetBBoxFilterSupportForTests()
+})
 
 function params(query: string) {
   return new URLSearchParams(query)
@@ -157,5 +163,41 @@ describe('taskPageLocalFields', () => {
     expect(
       taskPageLocalFields(parseTaskListFilters(params('category=PLUMBING&poster=pat'))),
     ).toEqual(['Category', 'Poster'])
+  })
+})
+
+describe('bbox filter', () => {
+  it('parses and serializes the map viewport', () => {
+    const filters = parseTaskListFilters(
+      params('bbox=51.4,-0.2,51.6,0.1&status=OPEN'),
+    )
+    expect(filters.bbox).toEqual({
+      swLat: 51.4,
+      swLng: -0.2,
+      neLat: 51.6,
+      neLng: 0.1,
+    })
+    expect(taskListPath(filters)).toBe(
+      '/?status=OPEN&bbox=51.4%2C-0.2%2C51.6%2C0.1',
+    )
+  })
+
+  it('sends bbox on adminTasks until BE-49 is known missing', () => {
+    expect(
+      toTaskListQueryVariables(
+        parseTaskListFilters(params('bbox=51.4,-0.2,51.6,0.1')),
+      ),
+    ).toEqual({
+      first: 25,
+      filter: {
+        bbox: { swLat: 51.4, swLng: -0.2, neLat: 51.6, neLng: 0.1 },
+      },
+    })
+    markBBoxFilterUnsupported()
+    expect(
+      toTaskListQueryVariables(
+        parseTaskListFilters(params('bbox=51.4,-0.2,51.6,0.1')),
+      ),
+    ).toEqual({ first: 25 })
   })
 })
