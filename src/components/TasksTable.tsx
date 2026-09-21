@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
@@ -10,12 +11,17 @@ import { TablePager } from '@/components/TablePager'
 import { AdminTasks, Tasks } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatMoney } from '@/lib/dossier'
+import { bboxesEqual, taskCoordinates } from '@/lib/geo'
 import {
   graphqlErrorMessage,
   isMissingAdminFieldError,
+  isUnknownFilterFieldError,
 } from '@/lib/graphqlErrors'
 import { nextSort } from '@/lib/listParams'
 import {
+  BBOX_UNSUPPORTED_NOTICE,
+  isBBoxFilterUnsupported,
+  markBBoxFilterUnsupported,
   refineTasks,
   TASK_BUDGET_TYPES,
   TASK_CATEGORIES,
@@ -30,6 +36,16 @@ import {
 } from '@/lib/taskList'
 import type { AdminTasksQuery, TasksQuery } from '@codegen/schema'
 
+const TasksMap = dynamic(
+  () => import('@/components/TasksMap').then((mod) => mod.TasksMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="tasks-map tasks-map-placeholder">Loading map…</div>
+    ),
+  },
+)
+
 type TaskHit = AdminTasksQuery['adminTasks'][number]
 
 export function TasksTable() {
@@ -40,6 +56,10 @@ export function TasksTable() {
   const [error, setError] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const [rows, setRows] = useState<TaskHit[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [bboxUnsupported, setBboxUnsupported] = useState(
+    isBBoxFilterUnsupported(),
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -52,6 +72,10 @@ export function TasksTable() {
         if (cancelled) return
         setRows(result.rows)
         setBanner(result.banner)
+        setBboxUnsupported(isBBoxFilterUnsupported())
+        if (filters.bbox && isBBoxFilterUnsupported()) {
+          router.replace(taskListPath({ ...filters, bbox: null }))
+        }
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -62,7 +86,7 @@ export function TasksTable() {
     return () => {
       cancelled = true
     }
-  }, [filters])
+  }, [filters, router])
 
   function go(next: Partial<TaskListFilters>) {
     router.push(taskListPath({ ...filters, ...next }))
@@ -71,6 +95,30 @@ export function TasksTable() {
   const visible = refineTasks(rows, filters)
   const localNotice = taskPageLocalNotice(filters)
   const truncated = !busy && rows.length >= filters.first
+  const pins = useMemo(
+    () =>
+      visible.flatMap((task) => {
+        const point = taskCoordinates(task.location)
+        if (!point) return []
+        return [
+          {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            lat: point.lat,
+            lng: point.lng,
+          },
+        ]
+      }),
+    [visible],
+  )
+
+  useEffect(() => {
+    if (!selectedId) return
+    document
+      .querySelector('tr.is-selected, .data-card.is-selected')
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedId, visible])
 
   const columns: DataColumn<TaskHit>[] = [
     {
@@ -157,9 +205,10 @@ export function TasksTable() {
       <div className="page-intro">
         <h1>Tasks</h1>
         <p className="muted">
-          Marketplace tasks with shareable filters. Search, status, and
-          visibility go to <code>adminTasks</code>. Other filters refine the
-          current server page until cursor pagination lands.
+          Marketplace tasks with shareable filters and a Mapbox pin map. Search,
+          status, visibility, and viewport bbox go to <code>adminTasks</code>{' '}
+          when the API supports them. Other filters refine the current server
+          page until cursor pagination lands.
         </p>
       </div>
 
@@ -287,6 +336,18 @@ export function TasksTable() {
       </FilterToolbar>
 
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
+      {bboxUnsupported ? (
+        <p className="banner banner-warn">
+          {BBOX_UNSUPPORTED_NOTICE}{' '}
+          <a
+            className="inline-link"
+            href="https://linear.app/slashie/issue/BE-49/admin-api-cursor-pages-richer-filters-for-admintasksadminusersinbox"
+          >
+            BE-49
+          </a>
+          .
+        </p>
+      ) : null}
       {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
       {truncated ? (
         <p className="banner banner-warn">
@@ -303,6 +364,19 @@ export function TasksTable() {
       ) : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
+      <TasksMap
+        pins={pins}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onOpen={(id) => router.push(`/tasks/${id}`)}
+        initialBbox={filters.bbox}
+        areaBrowseEnabled={!bboxUnsupported}
+        onBboxChange={(bbox) => {
+          if (bboxUnsupported || bboxesEqual(bbox, filters.bbox)) return
+          router.replace(taskListPath({ ...filters, bbox }))
+        }}
+      />
+
       <DataTable
         rows={visible}
         columns={columns}
@@ -312,6 +386,8 @@ export function TasksTable() {
         onSort={(key) => go(nextSort(filters.sort, filters.dir, key))}
         loading={busy}
         empty="No tasks for this filter."
+        selectedKey={selectedId}
+        onRowSelect={(task) => setSelectedId(task.id)}
         renderCard={(task) => <TaskCard task={task} />}
         footer={
           <TablePager
@@ -350,6 +426,7 @@ async function listTasks(filters: TaskListFilters): Promise<{
   banner: string | null
 }> {
   const vars = toTaskListQueryVariables(filters)
+  const sentBbox = Boolean(vars.filter?.bbox)
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
@@ -358,6 +435,10 @@ async function listTasks(filters: TaskListFilters): Promise<{
     })
     return { rows: result.data?.adminTasks ?? [], banner: null }
   } catch (error) {
+    if (sentBbox && isUnknownFilterFieldError(error)) {
+      markBBoxFilterUnsupported()
+      return listTasks({ ...filters, bbox: null })
+    }
     if (!isMissingAdminFieldError(error)) throw error
   }
 

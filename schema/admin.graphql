@@ -37,6 +37,7 @@ See https://linear.app/slashie/issue/BE-42
 See https://linear.app/slashie/issue/BE-43
 See https://linear.app/slashie/issue/BE-46
 See https://linear.app/slashie/issue/BE-48
+See https://linear.app/slashie/issue/BE-49
 """
 
 scalar DateTime
@@ -371,11 +372,33 @@ input WorkerFilter {
   search: String
 }
 
+"""Visible map viewport for ops area browse (BE-49)."""
+input GeoBBox {
+  swLat: Float!
+  swLng: Float!
+  neLat: Float!
+  neLng: Float!
+}
+
 input AdminTaskFilter {
   search: String
   id: ID
   status: [TaskStatus!]
   hidden: Boolean
+  """
+  Tasks whose location falls inside this viewport. Scaffolded for FE-171;
+  live Apollo rejects the field until BE-49 ships bbox.
+  """
+  bbox: GeoBBox
+  """BE-49 proposed; not sent until the live schema accepts it."""
+  category: String
+  posterSearch: String
+  posterId: ID
+  budgetMin: Float
+  budgetMax: Float
+  budgetType: TaskBudgetType
+  createdAfter: DateTime
+  createdBefore: DateTime
 }
 
 input AdminUpdateTaskInput {

@@ -9,6 +9,19 @@ export function graphqlErrorMessage(error: unknown): string {
   return 'Something went wrong'
 }
 
+export function isUnknownFilterFieldError(error: unknown): boolean {
+  const message = graphqlErrorMessage(error).toLowerCase()
+  if (message.includes('cannot query field')) return false
+  return (
+    message.includes('bbox') ||
+    message.includes('geobbox') ||
+    ((message.includes('admintaskfilter') || message.includes('filter')) &&
+      (message.includes('unknown') ||
+        message.includes('not defined') ||
+        message.includes('unknown argument')))
+  )
+}
+
 export function isMissingAdminFieldError(error: unknown): boolean {
   const message = graphqlErrorMessage(error).toLowerCase()
   return (

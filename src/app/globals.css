@@ -322,6 +322,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: var(--touch);
   border: 1px solid var(--line);
   background: var(--bg-elev);
@@ -552,6 +553,17 @@ select.input {
 
 .data-table tbody tr:hover {
   background: #f4f8f6;
+}
+
+.data-table tbody tr.is-selected,
+.data-card.is-selected {
+  background: #e4f7ee;
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.data-table.is-selectable tbody tr {
+  cursor: pointer;
 }
 
 .table-link {
@@ -849,6 +861,106 @@ select.input {
   margin-top: 8px;
 }
 
+.useful-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tasks-map-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tasks-map {
+  position: relative;
+  height: 320px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  background: var(--bg-muted);
+}
+
+.tasks-map-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.tasks-map-placeholder p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tasks-map-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tasks-map-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-pin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: var(--brand-ink);
+}
+
+.map-pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--brand);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(10, 21, 18, 0.35);
+}
+
+.map-pin-label {
+  display: none;
+  margin-top: 4px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg-elev);
+  border-radius: 999px;
+  padding: 2px 8px;
+  box-shadow: var(--shadow);
+}
+
+.map-pin.is-selected .map-pin-dot {
+  width: 20px;
+  height: 20px;
+  outline: 2px solid var(--brand-ink);
+}
+
+.map-pin.is-selected .map-pin-label {
+  display: block;
+}
+
+.mapboxgl-ctrl-attrib {
+  font-size: 10px;
+}
+
 .section-heading {
   margin: 8px 0 0;
   font-size: 18px;
@@ -1105,6 +1217,10 @@ select.input {
 
   .filter-grid .field-wide {
     grid-column: span 1;
+  }
+
+  .tasks-map {
+    height: 240px;
   }
 }
 

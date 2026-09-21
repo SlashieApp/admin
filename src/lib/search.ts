@@ -1,4 +1,5 @@
 import { looksLikeId } from '@/lib/adminEmail'
+import type { GeoBBox } from '@/lib/geo'
 
 export const DEFAULT_ADMIN_PAGE_SIZE = 50
 
@@ -9,6 +10,8 @@ export type AdminTaskFilter = {
   id?: string
   status?: string[]
   hidden?: boolean
+  /** BE-49 proposed. Live Apollo may reject until bbox ships. */
+  bbox?: GeoBBox
 }
 
 export type AdminTaskListVariables = {

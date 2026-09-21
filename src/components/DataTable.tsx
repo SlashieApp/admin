@@ -21,6 +21,8 @@ export function DataTable<T>({
   empty = 'No rows for this filter.',
   renderCard,
   footer,
+  selectedKey,
+  onRowSelect,
 }: {
   rows: T[]
   columns: DataColumn<T>[]
@@ -32,6 +34,8 @@ export function DataTable<T>({
   empty?: string
   renderCard?: (row: T) => ReactNode
   footer?: ReactNode
+  selectedKey?: string | null
+  onRowSelect?: (row: T) => void
 }) {
   if (loading) {
     return (
@@ -50,15 +54,23 @@ export function DataTable<T>({
     <div className="table-block">
       {renderCard ? (
         <div className="data-cards">
-          {rows.map((row) => (
-            <article key={rowKey(row)} className="data-card">
-              {renderCard(row)}
-            </article>
-          ))}
+          {rows.map((row) => {
+            const key = rowKey(row)
+            const selected = selectedKey === key
+            return (
+              <article
+                key={key}
+                className={selected ? 'data-card is-selected' : 'data-card'}
+                onClick={() => onRowSelect?.(row)}
+              >
+                {renderCard(row)}
+              </article>
+            )
+          })}
         </div>
       ) : null}
       <div className="data-table-wrap">
-        <table className="data-table">
+        <table className={onRowSelect ? 'data-table is-selectable' : 'data-table'}>
           <thead>
             <tr>
               {columns.map((column) => {
@@ -86,15 +98,23 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={rowKey(row)}>
-                {columns.map((column) => (
-                  <td key={column.key} className={column.className}>
-                    {column.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const key = rowKey(row)
+              const selected = selectedKey === key
+              return (
+                <tr
+                  key={key}
+                  className={selected ? 'is-selected' : undefined}
+                  onClick={() => onRowSelect?.(row)}
+                >
+                  {columns.map((column) => (
+                    <td key={column.key} className={column.className}>
+                      {column.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
