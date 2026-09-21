@@ -127,8 +127,7 @@ h3,
   gap: 16px;
   min-height: 64px;
   padding: 8px 16px;
-  width: min(1100px, 100%);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .app-body {
@@ -248,8 +247,7 @@ h3,
   flex-direction: column;
   gap: 12px;
   padding: 8px 16px 16px;
-  width: min(1100px, 100%);
-  margin: 0 auto;
+  width: 100%;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -419,8 +417,41 @@ select.input {
   flex: 0 0 auto;
 }
 
+.filter-toolbar {
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.filter-grid .field-wide {
+  grid-column: span 2;
+}
+
+.filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .data-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--bg-elev);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -430,24 +461,89 @@ select.input {
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .data-table th,
 .data-table td {
   text-align: left;
-  padding: 12px 14px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--bg-muted);
   vertical-align: middle;
 }
 
 .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   background: var(--bg-muted);
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.th-sort.is-active {
+  color: var(--text);
+}
+
+.table-select {
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.data-cards {
+  display: none;
+}
+
+.data-card {
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.table-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.table-pager-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.pager-size {
+  min-width: 110px;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 24px 4px;
 }
 
 .data-table tbody tr:last-child td {
@@ -997,13 +1093,30 @@ select.input {
     grid-template-columns: 1fr;
   }
 
-  .header-bar {
+  .header-bar,
+  .header-drawer {
     padding-inline: 12px;
   }
 
   .main,
   .auth-main {
     width: min(1100px, calc(100% - 24px));
+  }
+
+  .filter-grid .field-wide {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .data-table-wrap {
+    display: none;
+  }
+
+  .data-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 }
 

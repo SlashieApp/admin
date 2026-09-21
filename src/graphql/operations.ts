@@ -78,6 +78,11 @@ const TASK_LIST_FIELDS = gql`
     status
     views
     hidden
+    datetime {
+      date
+      time
+      type
+    }
     budget {
       amount
       currency

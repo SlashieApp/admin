@@ -14,3 +14,7 @@ export function slashieWordmarkSrc(surface: BrandSurface): string {
 export function slashieMarkSrc(): string {
   return '/images/slashie-mark.svg'
 }
+
+export function slashieFaviconSrc(): string {
+  return '/images/slashie-mark.svg'
+}

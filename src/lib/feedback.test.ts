@@ -11,8 +11,10 @@ import {
   mergeFeedbackRow,
   parseFeedbackCategoryFilter,
   parseFeedbackId,
+  parseFeedbackListFilters,
   parseFeedbackStatusFilter,
   ratingLabel,
+  refineFeedbacks,
   sortFeedbacksOpenFirst,
   submitterHref,
   submitterLabel,
@@ -224,6 +226,44 @@ describe('feedbackPath', () => {
     expect(
       feedbackPath({ status: 'OPEN', category: 'BUG', id: 'f9' }),
     ).toBe('/feedback?status=OPEN&category=BUG&id=f9')
+    expect(
+      feedbackPath({
+        status: 'OPEN',
+        email: 'pat@x.com',
+        rating: 4,
+        after: 'c1',
+      }),
+    ).toBe('/feedback?status=OPEN&email=pat%40x.com&rating=4&after=c1')
+  })
+})
+
+describe('refineFeedbacks', () => {
+  it('filters email, rating, free text, and date on the current page', () => {
+    const rows = [
+      feedback({
+        id: '1',
+        email: 'pat@x.com',
+        rating: 5,
+        message: 'Great quotes',
+      }),
+      feedback({
+        id: '2',
+        email: 'lee@x.com',
+        rating: 2,
+        message: 'Bug on map',
+        createdAt: '2026-08-01T00:00:00.000Z',
+      }),
+    ]
+    const filters = parseFeedbackListFilters(
+      new URLSearchParams('email=pat&rating=5&q=quotes'),
+    )
+    expect(refineFeedbacks(rows, filters).map((row) => row.id)).toEqual(['1'])
+    expect(
+      refineFeedbacks(
+        rows,
+        parseFeedbackListFilters(new URLSearchParams('from=2026-09-01')),
+      ).map((row) => row.id),
+    ).toEqual(['1'])
   })
 })
 

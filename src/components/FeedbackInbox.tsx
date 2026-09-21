@@ -1,30 +1,33 @@
 'use client'
 
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 
+import { DataTable, type DataColumn } from '@/components/DataTable'
+import { FilterToolbar } from '@/components/FilterToolbar'
+import { TablePager } from '@/components/TablePager'
 import { formatWhen } from '@/lib/dossier'
 import {
   adjustFeedbackSummary,
   categoryLabel,
+  feedbackFiltersFromForm,
   feedbackMailto,
   feedbackPath,
   feedbackPreview,
-  mergeFeedbackRow,
-  parseFeedbackCategoryFilter,
-  parseFeedbackId,
-  parseFeedbackStatusFilter,
-  ratingLabel,
-  submitterHref,
-  submitterLabel,
+  feedbackPageLocalNotice,
   FEEDBACK_CATEGORIES,
   FEEDBACK_STATUSES,
-  type FeedbackCategoryFilter,
+  mergeFeedbackRow,
+  parseFeedbackListFilters,
+  ratingLabel,
+  refineFeedbacks,
+  submitterHref,
+  submitterLabel,
   type FeedbackDraftReply,
+  type FeedbackListFilters,
   type FeedbackRow,
   type FeedbackStatus,
-  type FeedbackStatusFilter,
   type FeedbackSummary,
 } from '@/lib/feedback'
 import {
@@ -34,50 +37,21 @@ import {
   updateAdminFeedbackStatus,
 } from '@/lib/feedbackInbox'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
+import { nextSort } from '@/lib/listParams'
 import { usePrefersReducedMotion } from '@/lib/usePrefersReducedMotion'
-
-const STATUS_FILTERS: { value: FeedbackStatusFilter; label: string }[] = [
-  { value: 'ALL', label: 'All statuses' },
-  { value: 'OPEN', label: 'Open' },
-  { value: 'REVIEWED', label: 'Reviewed' },
-  { value: 'REPLIED', label: 'Replied' },
-  { value: 'DISMISSED', label: 'Dismissed' },
-]
-
-const CATEGORY_FILTERS: { value: FeedbackCategoryFilter; label: string }[] = [
-  { value: 'ALL', label: 'All categories' },
-  ...FEEDBACK_CATEGORIES.map((value) => ({
-    value,
-    label: categoryLabel(value),
-  })),
-]
 
 export function FeedbackInbox() {
   const params = useSearchParams()
-  const status = parseFeedbackStatusFilter(params.get('status'))
-  const category = parseFeedbackCategoryFilter(params.get('category'))
-  const selectedId = parseFeedbackId(params.get('id'))
-  return (
-    <FeedbackPanel
-      key={`${status}:${category}`}
-      status={status}
-      category={category}
-      selectedId={selectedId}
-    />
-  )
+  const filters = useMemo(() => parseFeedbackListFilters(params), [params])
+  return <FeedbackPanel filters={filters} />
 }
 
-function FeedbackPanel({
-  status,
-  category,
-  selectedId,
-}: {
-  status: FeedbackStatusFilter
-  category: FeedbackCategoryFilter
-  selectedId: string | null
-}) {
+function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
+  const router = useRouter()
   const [rows, setRows] = useState<FeedbackRow[]>([])
   const [summary, setSummary] = useState<FeedbackSummary | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [cursorStack, setCursorStack] = useState<string[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
@@ -93,11 +67,17 @@ function FeedbackPanel({
       setBanner(null)
       try {
         const [list, counts] = await Promise.all([
-          listAdminFeedbacks({ status, category }),
+          listAdminFeedbacks({
+            status: filters.status,
+            category: filters.category,
+            after: filters.after || null,
+            first: filters.first,
+          }),
           loadFeedbackSummary().catch(() => null),
         ])
         if (cancelled) return
         setRows(list.items)
+        setNextCursor(list.nextCursor)
         setBanner(list.banner)
         setSummary(counts)
       } catch (err) {
@@ -110,7 +90,13 @@ function FeedbackPanel({
     return () => {
       cancelled = true
     }
-  }, [status, category])
+  }, [filters.status, filters.category, filters.after, filters.first])
+
+  function go(next: Partial<FeedbackListFilters>, keepAfter = false) {
+    const merged = { ...filters, ...next }
+    if (!keepAfter && next.after === undefined) merged.after = ''
+    router.push(feedbackPath(merged))
+  }
 
   async function onStatusChange(id: string, next: FeedbackStatus) {
     setUpdatingId(id)
@@ -136,17 +122,97 @@ function FeedbackPanel({
     }
   }
 
-  const selected = selectedId
-    ? (rows.find((row) => row.id === selectedId) ?? null)
+  const visible = refineFeedbacks(rows, filters)
+  const selected = filters.id
+    ? (visible.find((row) => row.id === filters.id) ??
+      rows.find((row) => row.id === filters.id) ??
+      null)
     : null
+  const localNotice = feedbackPageLocalNotice(filters)
 
   useEffect(() => {
-    if (!selectedId) return
+    if (!filters.id) return
     document.getElementById('feedback-detail')?.scrollIntoView({
       block: 'start',
       behavior: reduceMotion ? 'auto' : 'smooth',
     })
-  }, [selectedId, reduceMotion])
+  }, [filters.id, reduceMotion])
+
+  const columns: DataColumn<FeedbackRow>[] = [
+    {
+      key: 'submitter',
+      header: 'Submitter',
+      sortKey: 'submitter',
+      render: (row) => (
+        <Link
+          href={feedbackPath({ ...filters, id: row.id })}
+          className="table-link"
+        >
+          {submitterLabel(row)}
+        </Link>
+      ),
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      sortKey: 'email',
+      render: (row) => {
+        const href = submitterHref(row)
+        return href ? (
+          <Link href={href} className="inline-link">
+            {row.email}
+          </Link>
+        ) : (
+          row.email
+        )
+      },
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      sortKey: 'category',
+      render: (row) => categoryLabel(row.category),
+    },
+    {
+      key: 'rating',
+      header: 'Rating',
+      sortKey: 'rating',
+      render: (row) => ratingLabel(row.rating),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortKey: 'status',
+      render: (row) => (
+        <select
+          className="input table-select"
+          value={row.status}
+          disabled={updatingId === row.id}
+          aria-label={`Update status for ${submitterLabel(row)}`}
+          onChange={(event) =>
+            void onStatusChange(row.id, event.target.value as FeedbackStatus)
+          }
+        >
+          {FEEDBACK_STATUSES.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      sortKey: 'created',
+      render: (row) => formatWhen(row.createdAt),
+    },
+    {
+      key: 'message',
+      header: 'Message',
+      render: (row) => feedbackPreview(row.message),
+    },
+  ]
 
   return (
     <section className="stack">
@@ -167,173 +233,175 @@ function FeedbackPanel({
         <SummaryMetric
           label="Total"
           value={summary?.total}
-          href={feedbackPath({ category })}
-          active={status === 'ALL'}
+          href={feedbackPath({ ...filters, status: 'ALL', after: '' })}
+          active={filters.status === 'ALL'}
         />
         <SummaryMetric
           label="Open"
           value={summary?.open}
-          href={feedbackPath({ status: 'OPEN', category })}
-          active={status === 'OPEN'}
+          href={feedbackPath({ ...filters, status: 'OPEN', after: '' })}
+          active={filters.status === 'OPEN'}
         />
         <SummaryMetric
           label="Reviewed"
           value={summary?.reviewed}
-          href={feedbackPath({ status: 'REVIEWED', category })}
-          active={status === 'REVIEWED'}
+          href={feedbackPath({ ...filters, status: 'REVIEWED', after: '' })}
+          active={filters.status === 'REVIEWED'}
         />
         <SummaryMetric
           label="Replied"
           value={summary?.replied}
-          href={feedbackPath({ status: 'REPLIED', category })}
-          active={status === 'REPLIED'}
+          href={feedbackPath({ ...filters, status: 'REPLIED', after: '' })}
+          active={filters.status === 'REPLIED'}
         />
       </dl>
 
-      <div className="filter-block">
-        <p className="filter-label" id="feedback-status-filter">
+      <FilterToolbar
+        key={feedbackPath({ ...filters, after: '', sort: '', dir: 'desc', id: null })}
+        busy={busy}
+        onSubmit={(event) => {
+          event.preventDefault()
+          setCursorStack([])
+          go(feedbackFiltersFromForm(new FormData(event.currentTarget), filters))
+        }}
+        onClear={() => {
+          setCursorStack([])
+          router.push('/feedback')
+        }}
+      >
+        <label className="field">
           Status
-        </p>
-        <nav className="tabs" aria-labelledby="feedback-status-filter">
-          {STATUS_FILTERS.map((row) => (
-            <Link
-              key={row.value}
-              href={feedbackPath({ status: row.value, category })}
-              className={status === row.value ? 'tab is-active' : 'tab'}
-              aria-current={status === row.value ? 'page' : undefined}
-            >
-              {row.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
-
-      <div className="filter-block">
-        <p className="filter-label" id="feedback-category-filter">
+          <select className="input" name="status" defaultValue={filters.status}>
+            <option value="ALL">All statuses</option>
+            {FEEDBACK_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           Category
-        </p>
-        <nav className="tabs" aria-labelledby="feedback-category-filter">
-          {CATEGORY_FILTERS.map((row) => (
-            <Link
-              key={row.value}
-              href={feedbackPath({ status, category: row.value })}
-              className={category === row.value ? 'tab is-active' : 'tab'}
-              aria-current={category === row.value ? 'page' : undefined}
-            >
-              {row.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
+          <select
+            className="input"
+            name="category"
+            defaultValue={filters.category}
+          >
+            <option value="ALL">All categories</option>
+            {FEEDBACK_CATEGORIES.map((category) => (
+              <option key={category} value={category}>
+                {categoryLabel(category)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Email
+          <input
+            className="input"
+            name="email"
+            defaultValue={filters.email}
+            placeholder="Contains…"
+          />
+        </label>
+        <label className="field">
+          Rating
+          <select
+            className="input"
+            name="rating"
+            defaultValue={filters.rating ?? ''}
+          >
+            <option value="">Any</option>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <option key={value} value={value}>
+                {value}/5
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field field-wide">
+          Free text
+          <input
+            className="input search-input"
+            name="q"
+            defaultValue={filters.q}
+            placeholder="Message, name, or page"
+            type="search"
+          />
+        </label>
+        <label className="field">
+          From
+          <input
+            className="input"
+            name="from"
+            type="date"
+            defaultValue={filters.from}
+          />
+        </label>
+        <label className="field">
+          To
+          <input
+            className="input"
+            name="to"
+            type="date"
+            defaultValue={filters.to}
+          />
+        </label>
+      </FilterToolbar>
 
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
+      {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
       {updateError ? <p className="banner banner-error">{updateError}</p> : null}
-      {busy ? <p className="muted">Loading feedback…</p> : null}
-
-      {!busy && !error && rows.length === 0 ? (
-        <p className="muted">No feedback for this filter.</p>
-      ) : null}
 
       <div className={selected ? 'layout-split has-selection' : 'layout-split'}>
-        <ul className="list">
-          {rows.map((row) => {
-            const href = submitterHref(row)
-            const updating = updatingId === row.id
-            const isSelected = selectedId === row.id
-            return (
-              <li
-                key={row.id}
-                className={
-                  isSelected
-                    ? 'card card-pad report-card is-selected'
-                    : 'card card-pad report-card'
-                }
-              >
-                <div className="card-top">
-                  <Link
-                    href={feedbackPath({ status, category, id: row.id })}
-                    className="inline-link"
-                    aria-current={isSelected ? 'page' : undefined}
-                  >
-                    {submitterLabel(row)}
-                  </Link>
-                  <span
-                    className={
-                      row.status === 'OPEN'
-                        ? 'pill pill-warn'
-                        : row.status === 'REPLIED'
-                          ? 'pill pill-ok'
-                          : 'pill'
-                    }
-                  >
-                    {row.status}
-                  </span>
-                </div>
-                <dl className="kv report-kv">
-                  <div>
-                    <dt>Category</dt>
-                    <dd>{categoryLabel(row.category)}</dd>
-                  </div>
-                  <div>
-                    <dt>Rating</dt>
-                    <dd>{ratingLabel(row.rating)}</dd>
-                  </div>
-                  <div>
-                    <dt>Email</dt>
-                    <dd>
-                      {href ? (
-                        <Link href={href} className="inline-link">
-                          {row.email}
-                        </Link>
-                      ) : (
-                        row.email
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Created</dt>
-                    <dd>{formatWhen(row.createdAt)}</dd>
-                  </div>
-                </dl>
-                {row.pageUrl ? (
-                  <p className="meta">
-                    Page:{' '}
-                    <PageLink href={row.pageUrl} />
-                  </p>
-                ) : null}
-                <p>{feedbackPreview(row.message)}</p>
-                <label className="field">
-                  Update status
-                  <select
-                    className="input"
-                    value={row.status}
-                    disabled={updating}
-                    aria-label={`Update status for ${submitterLabel(row)}`}
-                    onChange={(event) =>
-                      void onStatusChange(
-                        row.id,
-                        event.target.value as FeedbackStatus,
-                      )
-                    }
-                  >
-                    {FEEDBACK_STATUSES.map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {updating ? <p className="meta">Saving…</p> : null}
-              </li>
-            )
-          })}
-        </ul>
-
+        <DataTable
+          rows={visible}
+          columns={columns}
+          rowKey={(row) => row.id}
+          sort={filters.sort}
+          dir={filters.dir}
+          onSort={(key) => go(nextSort(filters.sort, filters.dir, key), true)}
+          loading={busy}
+          empty="No feedback for this filter."
+          renderCard={(row) => (
+            <FeedbackCard
+              row={row}
+              href={feedbackPath({ ...filters, id: row.id })}
+              selected={filters.id === row.id}
+            />
+          )}
+          footer={
+            <TablePager
+              shown={visible.length}
+              fetched={rows.length}
+              pageSize={filters.first}
+              hasNext={Boolean(nextCursor)}
+              hasPrev={Boolean(filters.after)}
+              onPageSize={(first) => {
+                setCursorStack([])
+                go({ first, after: '' })
+              }}
+              onNext={() => {
+                if (!nextCursor) return
+                setCursorStack((stack) => [...stack, filters.after])
+                go({ after: nextCursor }, true)
+              }}
+              onPrev={() => {
+                const prev = cursorStack.at(-1) ?? ''
+                setCursorStack((stack) => stack.slice(0, -1))
+                go({ after: prev }, true)
+              }}
+              onFirst={() => {
+                setCursorStack([])
+                go({ after: '' })
+              }}
+            />
+          }
+        />
         <FeedbackDetail
           row={selected}
-          status={status}
-          category={category}
+          filters={filters}
           updating={selected ? updatingId === selected.id : false}
           onStatusChange={onStatusChange}
         />
@@ -342,16 +410,53 @@ function FeedbackPanel({
   )
 }
 
+function FeedbackCard({
+  row,
+  href,
+  selected,
+}: {
+  row: FeedbackRow
+  href: string
+  selected: boolean
+}) {
+  return (
+    <>
+      <div className="card-top">
+        <Link
+          href={href}
+          className="table-link"
+          aria-current={selected ? 'page' : undefined}
+        >
+          {submitterLabel(row)}
+        </Link>
+        <span
+          className={
+            row.status === 'OPEN'
+              ? 'pill pill-warn'
+              : row.status === 'REPLIED'
+                ? 'pill pill-ok'
+                : 'pill'
+          }
+        >
+          {row.status}
+        </span>
+      </div>
+      <p className="meta">
+        {categoryLabel(row.category)} · {ratingLabel(row.rating)} · {row.email}
+      </p>
+      <p>{feedbackPreview(row.message)}</p>
+    </>
+  )
+}
+
 function FeedbackDetail({
   row,
-  status,
-  category,
+  filters,
   updating,
   onStatusChange,
 }: {
   row: FeedbackRow | null
-  status: FeedbackStatusFilter
-  category: FeedbackCategoryFilter
+  filters: FeedbackListFilters
   updating: boolean
   onStatusChange: (id: string, next: FeedbackStatus) => Promise<void>
 }) {
@@ -448,7 +553,7 @@ function FeedbackDetail({
       </label>
       <DraftReplyPanel row={row} />
       <p className="meta">
-        <Link href={feedbackPath({ status, category })} className="inline-link">
+        <Link href={feedbackPath({ ...filters, id: null })} className="inline-link">
           Clear selection
         </Link>
       </p>
