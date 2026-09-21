@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
@@ -14,7 +15,15 @@ import {
   graphqlErrorMessage,
   isMissingAdminFieldError,
 } from '@/lib/graphqlErrors'
+import {
+  bboxEquals,
+  nextDeniedFilterKeys,
+  presentProposedFilterKeys,
+  PROPOSED_ADMIN_TASK_FILTER_KEYS,
+  type GeoBBox,
+} from '@/lib/geo'
 import { nextSort } from '@/lib/listParams'
+import { pinsFromTasks } from '@/lib/taskMapPins'
 import {
   refineTasks,
   TASK_BUDGET_TYPES,
@@ -30,7 +39,21 @@ import {
 } from '@/lib/taskList'
 import type { AdminTasksQuery, TasksQuery } from '@codegen/schema'
 
+const TasksMap = dynamic(
+  () => import('@/components/TasksMap').then((mod) => mod.TasksMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="ops-map">
+        <p className="muted card-pad">Loading map…</p>
+      </div>
+    ),
+  },
+)
+
 type TaskHit = AdminTasksQuery['adminTasks'][number]
+
+const deniedAdminTaskFilterKeys = new Set<string>()
 
 export function TasksTable() {
   const params = useSearchParams()
@@ -40,6 +63,9 @@ export function TasksTable() {
   const [error, setError] = useState<string | null>(null)
   const [banner, setBanner] = useState<string | null>(null)
   const [rows, setRows] = useState<TaskHit[]>([])
+  const [bbox, setBbox] = useState<GeoBBox | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [denyKeys, setDenyKeys] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -48,10 +74,11 @@ export function TasksTable() {
       setError(null)
       setBanner(null)
       try {
-        const result = await listTasks(filters)
+        const result = await listTasks(filters, bbox)
         if (cancelled) return
         setRows(result.rows)
         setBanner(result.banner)
+        setDenyKeys([...deniedAdminTaskFilterKeys])
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -62,15 +89,31 @@ export function TasksTable() {
     return () => {
       cancelled = true
     }
-  }, [filters])
+  }, [filters, bbox])
 
   function go(next: Partial<TaskListFilters>) {
     router.push(taskListPath({ ...filters, ...next }))
   }
 
   const visible = refineTasks(rows, filters)
-  const localNotice = taskPageLocalNotice(filters)
+  const localNotice = taskPageLocalNotice(filters, denyKeys)
   const truncated = !busy && rows.length >= filters.first
+  const pins = pinsFromTasks(visible)
+  const bboxSupported = Boolean(bbox) && !denyKeys.includes('bbox')
+  const bboxBlocked = denyKeys.includes('bbox')
+
+  function selectTask(id: string) {
+    setSelectedId(id)
+    const node =
+      document.getElementById(`task-row-${id}`) ??
+      document.getElementById(`task-card-${id}`)
+    node?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+
+  function onUserBBox(next: GeoBBox) {
+    if (deniedAdminTaskFilterKeys.has('bbox')) return
+    setBbox((current) => (bboxEquals(current, next) ? current : next))
+  }
 
   const columns: DataColumn<TaskHit>[] = [
     {
@@ -157,9 +200,16 @@ export function TasksTable() {
       <div className="page-intro">
         <h1>Tasks</h1>
         <p className="muted">
-          Marketplace tasks with shareable filters. Search, status, and
-          visibility go to <code>adminTasks</code>. Other filters refine the
-          current server page until cursor pagination lands.
+          Marketplace tasks with shareable filters and an ops map. Search,
+          status, and visibility go to <code>adminTasks</code>. Pan the map to
+          load the visible area when{' '}
+          <a
+            className="inline-link"
+            href="https://linear.app/slashie/issue/BE-49/admin-api-cursor-pages-richer-filters-for-admintasksadminusersinbox"
+          >
+            BE-49
+          </a>{' '}
+          bbox is on Apollo.
         </p>
       </div>
 
@@ -288,25 +338,57 @@ export function TasksTable() {
 
       {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
+      {bboxBlocked ? (
+        <p className="banner banner-warn">
+          Map pins show this server page. Area browse (pan/zoom bbox) needs{' '}
+          <a
+            className="inline-link"
+            href="https://linear.app/slashie/issue/BE-49/admin-api-cursor-pages-richer-filters-for-admintasksadminusersinbox"
+          >
+            BE-49
+          </a>
+          .
+        </p>
+      ) : null}
+      {bboxSupported ? (
+        <p className="banner banner-ok">
+          Showing tasks in the visible map area
+          {pins.length !== visible.length
+            ? ` · ${pins.length} of ${visible.length} have coordinates`
+            : ''}
+          .
+        </p>
+      ) : null}
       {truncated ? (
         <p className="banner banner-warn">
           Showing the first {filters.first} matching server rows.{' '}
           <code>adminTasks</code> has no cursor yet —{' '}
           <a
             className="inline-link"
-            href="https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback"
+            href="https://linear.app/slashie/issue/BE-49/admin-api-cursor-pages-richer-filters-for-admintasksadminusersinbox"
           >
-            BE-50
+            BE-49
           </a>
           .
         </p>
       ) : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
+      <TasksMap
+        pins={pins}
+        selectedId={selectedId}
+        onSelect={selectTask}
+        onOpen={(id) => router.push(`/tasks/${id}`)}
+        onUserBBox={onUserBBox}
+        lockCamera={Boolean(bbox)}
+      />
+
       <DataTable
         rows={visible}
         columns={columns}
         rowKey={(task) => task.id}
+        selectedKey={selectedId}
+        onRowClick={(task) => setSelectedId(task.id)}
         sort={filters.sort}
         dir={filters.dir}
         onSort={(key) => go(nextSort(filters.sort, filters.dir, key))}
@@ -345,17 +427,52 @@ function TaskCard({ task }: { task: TaskListRow }) {
   )
 }
 
-async function listTasks(filters: TaskListFilters): Promise<{
+async function listTasks(
+  filters: TaskListFilters,
+  bbox: GeoBBox | null,
+): Promise<{
   rows: TaskHit[]
   banner: string | null
 }> {
-  const vars = toTaskListQueryVariables(filters)
+  let denyKeys = [...deniedAdminTaskFilterKeys]
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const vars = toTaskListQueryVariables(filters, { bbox, denyKeys })
+    try {
+      const result = await apolloClient.query<AdminTasksQuery>({
+        query: AdminTasks,
+        variables: vars,
+        fetchPolicy: 'network-only',
+      })
+      for (const key of denyKeys) deniedAdminTaskFilterKeys.add(key)
+      return { rows: result.data?.adminTasks ?? [], banner: null }
+    } catch (error) {
+      if (!isMissingAdminFieldError(error)) throw error
+      const present = presentProposedFilterKeys(
+        (vars.filter ?? {}) as Record<string, unknown>,
+      )
+      if (present.length === 0) break
+      const next = nextDeniedFilterKeys(
+        present,
+        graphqlErrorMessage(error),
+        denyKeys,
+      )
+      if (next.length === denyKeys.length) break
+      denyKeys = next
+    }
+  }
+
+  const vars = toTaskListQueryVariables(filters, {
+    denyKeys: PROPOSED_ADMIN_TASK_FILTER_KEYS,
+  })
   try {
     const result = await apolloClient.query<AdminTasksQuery>({
       query: AdminTasks,
       variables: vars,
       fetchPolicy: 'network-only',
     })
+    for (const key of PROPOSED_ADMIN_TASK_FILTER_KEYS) {
+      deniedAdminTaskFilterKeys.add(key)
+    }
     return { rows: result.data?.adminTasks ?? [], banner: null }
   } catch (error) {
     if (!isMissingAdminFieldError(error)) throw error

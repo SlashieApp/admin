@@ -18,7 +18,7 @@ export type Scalars = {
    * Marketplace types match live apollo introspection (2026-09-14) plus BE-43
    * admin expansions. `@admin` fields:
    *
-   *   adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
+   *   adminTasks(filter: AdminTaskFilter, first: Int = 50, after: String): [Task!]!
    *   adminTask(id: ID!): AdminTaskDossier!
    *   adminWorkers(search: String, id: ID, first: Int): [worker!]!
    *   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
@@ -51,6 +51,7 @@ export type Scalars = {
    * See https://linear.app/slashie/issue/BE-43
    * See https://linear.app/slashie/issue/BE-46
    * See https://linear.app/slashie/issue/BE-48
+   * See https://linear.app/slashie/issue/BE-49
    */
   DateTime: { input: any; output: any; }
   JSON: { input: any; output: any; }
@@ -133,8 +134,20 @@ export type AdminTaskDossier = {
 };
 
 export type AdminTaskFilter = {
+  /** BE-49 — restrict to the visible map viewport. */
+  bbox?: InputMaybe<GeoBoundingBox>;
+  budgetMax?: InputMaybe<Scalars['Float']['input']>;
+  budgetMin?: InputMaybe<Scalars['Float']['input']>;
+  budgetType?: InputMaybe<TaskBudgetType>;
+  /** BE-49 — category server filter. */
+  category?: InputMaybe<Scalars['String']['input']>;
+  createdAfter?: InputMaybe<Scalars['DateTime']['input']>;
+  createdBefore?: InputMaybe<Scalars['DateTime']['input']>;
   hidden?: InputMaybe<Scalars['Boolean']['input']>;
   id?: InputMaybe<Scalars['ID']['input']>;
+  posterId?: InputMaybe<Scalars['ID']['input']>;
+  /** BE-49 — poster name, email, or id. */
+  posterSearch?: InputMaybe<Scalars['String']['input']>;
   search?: InputMaybe<Scalars['String']['input']>;
   status?: InputMaybe<Array<TaskStatus>>;
 };
@@ -211,6 +224,17 @@ export enum FeedbackStatus {
   Replied = 'REPLIED',
   Reviewed = 'REVIEWED'
 }
+
+/**
+ * BE-49 map area. Tasks whose location.lat/lng fall inside the viewport.
+ * sw is south-west (min lat/lng), ne is north-east (max lat/lng).
+ */
+export type GeoBoundingBox = {
+  neLat: Scalars['Float']['input'];
+  neLng: Scalars['Float']['input'];
+  swLat: Scalars['Float']['input'];
+  swLng: Scalars['Float']['input'];
+};
 
 export enum IdentityVerificationStatus {
   NotStarted = 'NOT_STARTED',
@@ -394,7 +418,11 @@ export type Query = {
   adminReports: ReportPage;
   /** BE-43 @admin — full related records for one task. */
   adminTask: AdminTaskDossier;
-  /** BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page. */
+  /**
+   * BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page.
+   * BE-49 may add `after` + bbox/richer AdminTaskFilter fields, and may wrap
+   * the payload as TaskPage. The panel probes and falls back to [Task!]!.
+   */
   adminTasks: Array<Task>;
   /** BE-43 @admin — search users by email, name, and/or id. */
   adminUsers: Array<User>;
@@ -448,6 +476,7 @@ export type QueryAdminTaskArgs = {
 
 
 export type QueryAdminTasksArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
   filter?: InputMaybe<AdminTaskFilter>;
   first?: InputMaybe<Scalars['Int']['input']>;
 };
@@ -650,6 +679,15 @@ export type TaskLocationInput = {
   lat: Scalars['Float']['input'];
   lng: Scalars['Float']['input'];
   name: Scalars['String']['input'];
+};
+
+/**
+ * BE-49 proposed page wrapper. Live adminTasks still returns [Task!]!;
+ * the panel retries the array selection when items/nextCursor are absent.
+ */
+export type TaskPage = {
+  items: Array<Task>;
+  nextCursor?: Maybe<Scalars['String']['output']>;
 };
 
 export enum TaskPaymentMethod {

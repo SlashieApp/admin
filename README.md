@@ -2,7 +2,7 @@
 
 Private ops panel for the Slashie marketplace. Google sign-in, dashboard, auto-loaded task list, user search/management, and god-mode task edits via Apollo `@admin` APIs ([BE-42](https://linear.app/slashie/issue/BE-42), [BE-43](https://linear.app/slashie/issue/BE-43), [BE-44](https://linear.app/slashie/issue/BE-44)).
 
-Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell).
+Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links).
 
 ## Stack
 
@@ -23,7 +23,7 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks. People search is `/users` (`/?mode=users` redirects there). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Lists are filterable tables; filters live in the URL so views are shareable.
+**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks. People search is `/users` (`/?mode=users` redirects there). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Lists are filterable tables; filters live in the URL so views are shareable. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin / God-mode) with a live `slashie.app/tasks/[id]` link.
 
 ## GraphQL
 
@@ -31,7 +31,7 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 
 | Operation | Signature |
 | --- | --- |
-| `adminTasks` | `(filter: AdminTaskFilter, first: Int = 50): [Task!]!` |
+| `adminTasks` | `(filter: AdminTaskFilter, first: Int = 50, after: String): [Task!]!` |
 | `adminTask` | `(id: ID!): AdminTaskDossier!` |
 | `adminUsers` | `(search: String, id: ID, first: Int = 50): [User!]!` |
 | `adminOpsSummary` | `(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!` |
@@ -45,9 +45,9 @@ Operations live in `src/graphql/operations.ts`. Types are generated from the liv
 | `adminUpdateFeedbackStatus` | `(id: ID!, status: FeedbackStatus!): Feedback!` |
 | `adminFeedbackDraftReply` | `(id: ID!): AdminFeedbackDraftReply!` |
 
-`AdminTaskFilter`: `search`, `id`, `status`, `hidden`.
+`AdminTaskFilter`: `search`, `id`, `status`, `hidden`, plus proposed [BE-49](https://linear.app/slashie/issue/BE-49) fields (`category`, `posterSearch`, `budgetMin`/`budgetMax`/`budgetType`, `bbox`). The Tasks map sends `bbox` (and the richer filters) when you pan/zoom; if Apollo rejects an input field the panel retries without it and keeps page-local refine.
 
-List UX (FE-170): Tasks / Users / Feedback / Reports use compact tables, a filter toolbar, and URL query params. Feedback and Reports page with the existing `after` cursor. `adminTasks` / `adminUsers` only expose `first` (no cursor) — the panel shows that page and does **not** invent page-2 from a truncated list. Extra filters the API cannot apply (task category/poster/budget/job date; user disabled/worker/created; feedback email/rating/free-text/date; report reason/reporter/date) refine the current server page and show a warning. Companion BE follow-up: [BE-50](https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback). Task has no `createdAt`, so the tasks date filter is job date (`datetime.date`).
+List UX (FE-170 / FE-171): Tasks / Users / Feedback / Reports use compact tables, a filter toolbar, and URL query params. Tasks also has an ops Mapbox map: pins match the current table results; selecting a pin highlights the row. When BE-49 bbox is live, pan/zoom refetches that viewport (no client-side dump of every task). Feedback and Reports page with the existing `after` cursor. `adminTasks` / `adminUsers` still return arrays until BE-49 ships `TaskPage` — the panel shows that page and does **not** invent page-2 from a truncated list. Task has no `createdAt`, so the tasks date filter is job date (`datetime.date`).
 
 `AdminOpsRange`: `LAST_7_DAYS` | `LAST_30_DAYS` | `THIS_MONTH` | `LAST_MONTH`. Empty/omitted `adminTasks` filter returns the latest page of tasks (default `first` 50). Same for `adminUsers` with empty search.
 
@@ -71,6 +71,9 @@ Copy `.env.example` to `.env.local`:
 | --- | --- | --- |
 | `NEXT_PUBLIC_GRAPHQL_URL` | yes | Apollo origin, no trailing slash. Client calls `${url}/graphql`. Default in code: `https://api.slashie.app`. |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | yes | GIS client ID. |
+| `NEXT_PUBLIC_APP_URL` | no | Public marketplace origin for live-task links. Defaults to `https://slashie.app`. |
+| `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` | for Tasks map | Mapbox token (same as SlashieApp/web). |
+| `NEXT_PUBLIC_MAPBOX_STYLE_LIGHT` | no | Defaults to `mapbox://styles/mapbox/light-v11`. |
 | `SCHEMA_ACCESS_TOKEN` | for live codegen | Sent as `X-Schema-Token` when fetching the live SDL (`/schema`). Local `schema/admin.graphql` is used when unset. |
 | `POSTHOG_PERSONAL_API_KEY` | for analytics | Server-only personal API key. |
 | `POSTHOG_PROJECT_ID` | for analytics | PostHog project id. |

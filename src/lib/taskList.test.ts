@@ -74,6 +74,34 @@ describe('toTaskListQueryVariables', () => {
       first: 25,
     })
   })
+
+  it('sends BE-49 extras including bbox until the API rejects them', () => {
+    expect(
+      toTaskListQueryVariables(
+        parseTaskListFilters(params('category=PLUMBING&poster=pat&budgetMin=20')),
+        {
+          bbox: { swLat: 51.4, swLng: -0.2, neLat: 51.6, neLng: 0.1 },
+        },
+      ).filter,
+    ).toMatchObject({
+      category: 'PLUMBING',
+      posterSearch: 'pat',
+      budgetMin: 20,
+      bbox: { swLat: 51.4, swLng: -0.2, neLat: 51.6, neLng: 0.1 },
+    })
+  })
+
+  it('omits denied proposed keys on retry', () => {
+    expect(
+      toTaskListQueryVariables(
+        parseTaskListFilters(params('category=PLUMBING&status=OPEN')),
+        { denyKeys: ['category'] },
+      ),
+    ).toEqual({
+      first: 25,
+      filter: { status: ['OPEN'] },
+    })
+  })
 })
 
 describe('refineTasks', () => {
@@ -150,12 +178,20 @@ describe('taskFiltersFromForm', () => {
 })
 
 describe('taskPageLocalFields', () => {
-  it('lists filters the API cannot apply', () => {
+  it('lists only filters Apollo cannot apply', () => {
     expect(taskPageLocalFields(parseTaskListFilters(params('q=tap')))).toEqual(
       [],
     )
     expect(
-      taskPageLocalFields(parseTaskListFilters(params('category=PLUMBING&poster=pat'))),
+      taskPageLocalFields(
+        parseTaskListFilters(params('category=PLUMBING&poster=pat')),
+      ),
+    ).toEqual([])
+    expect(
+      taskPageLocalFields(
+        parseTaskListFilters(params('category=PLUMBING&poster=pat')),
+        ['category', 'posterSearch'],
+      ),
     ).toEqual(['Category', 'Poster'])
   })
 })

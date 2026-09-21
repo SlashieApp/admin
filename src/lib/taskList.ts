@@ -15,8 +15,13 @@ import {
 import {
   DEFAULT_ADMIN_PAGE_SIZE,
   toAdminTaskListVariables,
+  type AdminTaskFilter,
   type AdminTaskListVariables,
 } from '@/lib/search'
+import {
+  omitFilterKeys,
+  type GeoBBox,
+} from '@/lib/geo'
 
 export const TASK_STATUSES = [
   'DRAFT',
@@ -165,37 +170,64 @@ export function parseTaskListFilters(
   }
 }
 
+export type TaskListQueryOptions = {
+  bbox?: GeoBBox | null
+  /** Keys the live API already rejected (BE-49 fields). */
+  denyKeys?: Iterable<string>
+}
+
 export function toTaskListQueryVariables(
   filters: TaskListFilters,
+  options: TaskListQueryOptions = {},
 ): AdminTaskListVariables {
   const vars = toAdminTaskListVariables(
     filters.q,
     filters.first || DEFAULT_ADMIN_PAGE_SIZE,
   )
-  const extras: NonNullable<AdminTaskListVariables['filter']> = {
+  const extras: AdminTaskFilter = {
     ...vars.filter,
   }
   if (filters.status !== 'ALL') extras.status = [filters.status]
   if (filters.visibility === 'hidden') extras.hidden = true
   if (filters.visibility === 'public') extras.hidden = false
-  if (Object.keys(extras).length === 0) return { first: vars.first }
-  return { first: vars.first, filter: extras }
+  if (filters.category) extras.category = filters.category
+  if (filters.poster) extras.posterSearch = filters.poster
+  if (filters.budgetMin != null) extras.budgetMin = filters.budgetMin
+  if (filters.budgetMax != null) extras.budgetMax = filters.budgetMax
+  if (filters.budgetType !== 'ALL') extras.budgetType = filters.budgetType
+  if (options.bbox) extras.bbox = options.bbox
+  const filter = omitFilterKeys(extras, options.denyKeys ?? [])
+  if (Object.keys(filter).length === 0) return { first: vars.first }
+  return { first: vars.first, filter }
 }
 
-export function taskPageLocalFields(filters: TaskListFilters): string[] {
+/** Fields still applied on the current page because Apollo rejected them. */
+export function taskPageLocalFields(
+  filters: TaskListFilters,
+  denyKeys: Iterable<string> = [],
+): string[] {
+  const denied = new Set(denyKeys)
   const fields: string[] = []
-  if (filters.category) fields.push('Category')
-  if (filters.poster) fields.push('Poster')
-  if (filters.budgetMin != null || filters.budgetMax != null) {
+  if (filters.category && denied.has('category')) fields.push('Category')
+  if (filters.poster && denied.has('posterSearch')) fields.push('Poster')
+  if (
+    (filters.budgetMin != null || filters.budgetMax != null) &&
+    (denied.has('budgetMin') || denied.has('budgetMax'))
+  ) {
     fields.push('Budget range')
   }
-  if (filters.budgetType !== 'ALL') fields.push('Budget type')
+  if (filters.budgetType !== 'ALL' && denied.has('budgetType')) {
+    fields.push('Budget type')
+  }
   if (filters.from || filters.to) fields.push('Job date')
   return fields
 }
 
-export function taskPageLocalNotice(filters: TaskListFilters): string | null {
-  return pageLocalNotice(taskPageLocalFields(filters))
+export function taskPageLocalNotice(
+  filters: TaskListFilters,
+  denyKeys: Iterable<string> = [],
+): string | null {
+  return pageLocalNotice(taskPageLocalFields(filters, denyKeys))
 }
 
 export function refineTasks<T extends TaskListRow>(

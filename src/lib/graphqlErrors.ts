@@ -15,6 +15,8 @@ export function isMissingAdminFieldError(error: unknown): boolean {
     message.includes('cannot query field') ||
     message.includes('unknown field') ||
     message.includes('unknown argument') ||
+    message.includes('unknown input field') ||
+    message.includes('is not defined by type') ||
     (message.includes('admin') &&
       (message.includes('undefined') || message.includes('not found')))
   )

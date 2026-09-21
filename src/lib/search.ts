@@ -4,16 +4,33 @@ export const DEFAULT_ADMIN_PAGE_SIZE = 50
 
 export type AdminHomeMode = 'tasks' | 'users'
 
+export type AdminTaskBBox = {
+  swLat: number
+  swLng: number
+  neLat: number
+  neLng: number
+}
+
 export type AdminTaskFilter = {
   search?: string
   id?: string
   status?: string[]
   hidden?: boolean
+  category?: string
+  posterSearch?: string
+  posterId?: string
+  budgetMin?: number
+  budgetMax?: number
+  budgetType?: string
+  createdAfter?: string
+  createdBefore?: string
+  bbox?: AdminTaskBBox
 }
 
 export type AdminTaskListVariables = {
   filter?: AdminTaskFilter
   first: number
+  after?: string
 }
 
 export type AdminUserListVariables = {

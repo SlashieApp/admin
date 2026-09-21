@@ -28,6 +28,11 @@ describe('isMissingAdminFieldError', () => {
       ),
     ).toBe(true)
     expect(
+      isMissingAdminFieldError(
+        new Error('Field "bbox" is not defined by type "AdminTaskFilter".'),
+      ),
+    ).toBe(true)
+    expect(
       isMissingAdminFieldError(new Error('Not an admin')),
     ).toBe(false)
   })

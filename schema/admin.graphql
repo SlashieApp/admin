@@ -4,7 +4,7 @@ Slashie admin GraphQL contract.
 Marketplace types match live apollo introspection (2026-09-14) plus BE-43
 admin expansions. `@admin` fields:
 
-  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
+  adminTasks(filter: AdminTaskFilter, first: Int = 50, after: String): [Task!]!
   adminTask(id: ID!): AdminTaskDossier!
   adminWorkers(search: String, id: ID, first: Int): [worker!]!
   adminUsers(search: String, id: ID, first: Int = 50): [User!]!
@@ -37,6 +37,7 @@ See https://linear.app/slashie/issue/BE-42
 See https://linear.app/slashie/issue/BE-43
 See https://linear.app/slashie/issue/BE-46
 See https://linear.app/slashie/issue/BE-48
+See https://linear.app/slashie/issue/BE-49
 """
 
 scalar DateTime
@@ -371,11 +372,43 @@ input WorkerFilter {
   search: String
 }
 
+"""
+BE-49 map area. Tasks whose location.lat/lng fall inside the viewport.
+sw is south-west (min lat/lng), ne is north-east (max lat/lng).
+"""
+input GeoBoundingBox {
+  swLat: Float!
+  swLng: Float!
+  neLat: Float!
+  neLng: Float!
+}
+
 input AdminTaskFilter {
   search: String
   id: ID
   status: [TaskStatus!]
   hidden: Boolean
+  """BE-49 — category server filter."""
+  category: String
+  """BE-49 — poster name, email, or id."""
+  posterSearch: String
+  posterId: ID
+  budgetMin: Float
+  budgetMax: Float
+  budgetType: TaskBudgetType
+  createdAfter: DateTime
+  createdBefore: DateTime
+  """BE-49 — restrict to the visible map viewport."""
+  bbox: GeoBoundingBox
+}
+
+"""
+BE-49 proposed page wrapper. Live adminTasks still returns [Task!]!;
+the panel retries the array selection when items/nextCursor are absent.
+"""
+type TaskPage {
+  items: [Task!]!
+  nextCursor: String
 }
 
 input AdminUpdateTaskInput {
@@ -547,8 +580,12 @@ type Query {
   worker(id: ID!): worker
   workers(filter: WorkerFilter): [worker!]!
   order(id: ID, taskId: ID): Order
-  """BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page."""
-  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
+  """
+  BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page.
+  BE-49 may add `after` + bbox/richer AdminTaskFilter fields, and may wrap
+  the payload as TaskPage. The panel probes and falls back to [Task!]!.
+  """
+  adminTasks(filter: AdminTaskFilter, first: Int = 50, after: String): [Task!]!
   """BE-43 @admin — full related records for one task."""
   adminTask(id: ID!): AdminTaskDossier!
   """BE-42 @admin — search workers by text and/or id."""
