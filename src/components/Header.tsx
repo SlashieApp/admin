@@ -38,24 +38,16 @@ export function Header() {
           <span className="brand-product">Admin</span>
         </Link>
         {user ? (
-          <>
-            <div className="header-meta">
-              <span className="header-email">{user.email}</span>
-              <button type="button" className="btn btn-ghost header-logout" onClick={logout}>
-                Log out
-              </button>
-            </div>
-            <button
-              type="button"
-              className="header-menu-btn"
-              aria-expanded={open}
-              aria-controls={menuId}
-              aria-label={open ? 'Close menu' : 'Open menu'}
-              onClick={() => setOpen((current) => !current)}
-            >
-              {open ? <X size={22} aria-hidden /> : <Menu size={22} aria-hidden />}
-            </button>
-          </>
+          <button
+            type="button"
+            className="header-menu-btn"
+            aria-expanded={open}
+            aria-controls={menuId}
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            onClick={() => setOpen((current) => !current)}
+          >
+            {open ? <X size={22} aria-hidden /> : <Menu size={22} aria-hidden />}
+          </button>
         ) : null}
       </div>
       {user && open ? (
@@ -74,11 +66,26 @@ export function Header() {
 }
 
 export function SideNav() {
+  const { user, logout } = useAuth()
   return (
     <aside className="sidenav">
+      <Link href="/" className="brand">
+        <BrandLogo surface="dark" />
+        <span className="brand-product">Admin</span>
+      </Link>
       <Suspense fallback={<HeaderNavFallback stacked />}>
         <HeaderNav stacked />
       </Suspense>
+      {user ? (
+        <div className="sidenav-footer">
+          <span className="header-email" title={user.email}>
+            {user.email}
+          </span>
+          <button type="button" className="btn btn-ghost header-logout" onClick={logout}>
+            Log out
+          </button>
+        </div>
+      ) : null}
     </aside>
   )
 }

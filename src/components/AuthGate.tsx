@@ -64,9 +64,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <Header />
+      <SideNav />
       <div className="app-body">
-        <SideNav />
+        <Header />
         <main id="main-content" className="main" tabIndex={-1}>
           {children}
         </main>
