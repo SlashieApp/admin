@@ -2,12 +2,11 @@
 
 import { Menu, X } from 'lucide-react'
 import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { Suspense, useEffect, useId, useState } from 'react'
 
 import { BrandLogo } from '@/components/BrandLogo'
 import { useAuth } from '@/lib/auth'
-import { parseAdminHomeMode } from '@/lib/search'
 
 export function Header() {
   const { user, logout } = useAuth()
@@ -114,13 +113,10 @@ function HeaderNav({
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
-  const params = useSearchParams()
-  const homeMode = parseAdminHomeMode(params.get('mode'))
   const dashboardActive = pathname.startsWith('/dashboard')
   const reportsActive = pathname.startsWith('/reports')
   const feedbackActive = pathname.startsWith('/feedback')
-  const usersActive =
-    pathname.startsWith('/users') || (pathname === '/' && homeMode === 'users')
+  const usersActive = pathname.startsWith('/users')
   const tasksActive =
     !dashboardActive && !usersActive && !reportsActive && !feedbackActive
 

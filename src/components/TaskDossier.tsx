@@ -8,12 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CopyButton } from '@/components/CopyButton'
 import { PostHogAnalytics } from '@/components/PostHogAnalytics'
 import { TaskEditForm } from '@/components/TaskEditForm'
-import {
-  AdminTask,
-  AdminTaskByFilter,
-  Task,
-  TaskCore,
-} from '@/graphql/operations'
+import { AdminTask } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import {
   activityFromDossier,
@@ -22,39 +17,19 @@ import {
   formatWhen,
   linkedWorkersFromDossier,
 } from '@/lib/dossier'
-import {
-  graphqlErrorMessage,
-  isMissingAdminFieldError,
-} from '@/lib/graphqlErrors'
+import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import { publicTaskUrl } from '@/lib/publicLinks'
-import { listAdminReports } from '@/lib/reportInbox'
 import {
   parseTaskDossierTab,
   TASK_DOSSIER_TABS,
   taskDossierPath,
   type TaskDossierTab,
 } from '@/lib/taskDossier'
-import type {
-  AdminTaskByFilterQuery,
-  AdminTaskQuery,
-  TaskCoreQuery,
-  TaskQuery,
-} from '@codegen/schema'
+import type { AdminTaskQuery } from '@codegen/schema'
 
-type DossierTask = NonNullable<AdminTaskByFilterQuery['adminTasks']>[number]
-type DossierPayload = NonNullable<AdminTaskQuery['adminTask']>
-
-type Loaded = {
-  task: DossierTask
-  dossier: DossierPayload | null
-  source: 'adminTask' | 'adminTasks' | 'public'
-}
-
-type RelatedReport = {
-  id: string
-  status: string
-  reason: string
-}
+type Dossier = AdminTaskQuery['adminTask']
+type DossierTask = Dossier['task']
+type DossierOrder = Dossier['orders'][number]
 
 const TAB_LABELS: Record<TaskDossierTab, string> = {
   overview: 'Overview',
@@ -67,23 +42,22 @@ export function TaskDossier({ taskId }: { taskId: string }) {
   const router = useRouter()
   const params = useSearchParams()
   const tab = parseTaskDossierTab(params.get('tab'))
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [dossier, setDossier] = useState<Dossier | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [banner, setBanner] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [relatedReports, setRelatedReports] = useState<RelatedReport[]>([])
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
       setError(null)
-      setBanner(null)
       try {
-        const next = await loadDossier(taskId)
-        if (cancelled) return
-        setLoaded(next.data)
-        setBanner(next.banner)
+        const result = await apolloClient.query<AdminTaskQuery>({
+          query: AdminTask,
+          variables: { id: taskId },
+          fetchPolicy: 'network-only',
+        })
+        if (!cancelled) setDossier(result.data?.adminTask ?? null)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -96,67 +70,25 @@ export function TaskDossier({ taskId }: { taskId: string }) {
     }
   }, [taskId])
 
-  useEffect(() => {
-    let cancelled = false
-    async function loadRelated() {
-      try {
-        const result = await listAdminReports({
-          status: 'ALL',
-          targetType: 'TASK',
-          first: 50,
-        })
-        if (cancelled) return
-        setRelatedReports(
-          result.items
-            .filter((row) => row.targetId === taskId)
-            .map((row) => ({
-              id: row.id,
-              status: row.status,
-              reason: row.reason,
-            })),
-        )
-      } catch {
-        if (!cancelled) setRelatedReports([])
-      }
-    }
-    void loadRelated()
-    return () => {
-      cancelled = true
-    }
-  }, [taskId])
-
-  const poster = loaded?.dossier?.poster ?? loaded?.task.poster ?? null
-  const quotes = useMemo(
-    () => loaded?.dossier?.quotes ?? loaded?.task.quotes ?? [],
-    [loaded],
-  )
-  const orders = useMemo(
-    () => loaded?.dossier?.orders ?? loaded?.task.orders ?? [],
-    [loaded],
-  )
   const workers = useMemo(
     () =>
       linkedWorkersFromDossier({
-        workers: loaded?.dossier?.workers,
-        quotes,
-        orders,
+        workers: dossier?.workers,
+        quotes: dossier?.quotes,
+        orders: dossier?.orders,
       }),
-    [loaded, quotes, orders],
+    [dossier],
   )
   const activity = useMemo(
-    () =>
-      activityFromDossier({
-        activity: loaded?.dossier?.activity,
-        timeline: loaded?.task.timeline,
-      }),
-    [loaded],
+    () => activityFromDossier(dossier?.activity),
+    [dossier],
   )
 
   if (loading) return <p className="muted">Loading task dossier…</p>
   if (error) return <p className="banner banner-error">{error}</p>
-  if (!loaded) return <p className="muted">Task not found.</p>
+  if (!dossier) return <p className="muted">Task not found.</p>
 
-  const task = loaded.task
+  const { task, poster, quotes, orders } = dossier
   const liveUrl = publicTaskUrl(taskId)
 
   function goTab(next: TaskDossierTab) {
@@ -187,20 +119,8 @@ export function TaskDossier({ taskId }: { taskId: string }) {
             </Link>
           ) : null}
           <CopyButton value={taskId} label="Copy id" />
-          {relatedReports.slice(0, 3).map((report) => (
-            <Link
-              key={report.id}
-              href="/reports"
-              className="btn btn-ghost"
-              title={`${report.reason} · ${report.status}`}
-            >
-              Report {report.status.toLowerCase()}
-            </Link>
-          ))}
         </div>
       </div>
-
-      {banner ? <p className="banner banner-warn">{banner}</p> : null}
 
       <div className="tabs" role="tablist" aria-label="Task dossier">
         {TASK_DOSSIER_TABS.map((id) => (
@@ -228,12 +148,7 @@ export function TaskDossier({ taskId }: { taskId: string }) {
           aria-labelledby="task-tab-overview"
           className="stack"
         >
-          <OverviewPanel
-            task={task}
-            poster={poster}
-            workers={workers}
-            relatedReports={relatedReports}
-          />
+          <OverviewPanel task={task} poster={poster ?? null} workers={workers} />
         </div>
       ) : null}
 
@@ -278,7 +193,6 @@ function OverviewPanel({
   task,
   poster,
   workers,
-  relatedReports,
 }: {
   task: DossierTask
   poster: {
@@ -287,7 +201,6 @@ function OverviewPanel({
     profile?: { name?: string | null } | null
   } | null
   workers: ReturnType<typeof linkedWorkersFromDossier>
-  relatedReports: RelatedReport[]
 }) {
   return (
     <>
@@ -383,24 +296,6 @@ function OverviewPanel({
         )}
       </article>
 
-      {relatedReports.length > 0 ? (
-        <article className="section">
-          <h2>Related reports</h2>
-          <ul className="list">
-            {relatedReports.map((report) => (
-              <li key={report.id} className="card card-pad">
-                <div className="card-top">
-                  <Link href="/reports" className="inline-link">
-                    {report.reason}
-                  </Link>
-                  <span className="pill">{report.status}</span>
-                </div>
-                <p className="meta mono">{report.id}</p>
-              </li>
-            ))}
-          </ul>
-        </article>
-      ) : null}
     </>
   )
 }
@@ -409,8 +304,8 @@ function QuotesPanel({
   quotes,
   orders,
 }: {
-  quotes: NonNullable<DossierTask['quotes']>
-  orders: NonNullable<DossierTask['orders']>
+  quotes: Dossier['quotes']
+  orders: Dossier['orders']
 }) {
   return (
     <>
@@ -476,8 +371,9 @@ function QuotesPanel({
                   ) : (
                     'No worker user'
                   )}
-                  {` · ${formatWhen(order.createdAt)}`}
+                  {` · created ${formatWhen(order.createdAt)}`}
                 </p>
+                <OrderTimes order={order} />
               </li>
             ))}
           </ul>
@@ -496,7 +392,7 @@ function ActivityPanel({
     <article className="section">
       <h2>Activity and logs</h2>
       {activity.length === 0 ? (
-        <p className="muted">No notifications or timeline events.</p>
+        <p className="muted">No flashes or timeline events.</p>
       ) : (
         <ul className="list">
           {activity.map((row) => (
@@ -515,77 +411,35 @@ function ActivityPanel({
   )
 }
 
-async function loadDossier(id: string): Promise<{
-  data: Loaded
-  banner: string | null
-}> {
-  try {
-    const result = await apolloClient.query<AdminTaskQuery>({
-      query: AdminTask,
-      variables: { id },
-      fetchPolicy: 'network-only',
-    })
-    const dossier = result.data?.adminTask
-    if (dossier?.task) {
-      return {
-        data: { task: dossier.task, dossier, source: 'adminTask' },
-        banner: null,
-      }
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
+function OrderTimes({ order }: { order: DossierOrder }) {
+  const rows: Array<[string, string]> = [
+    [
+      'Booked',
+      `${formatWhen(order.bookedStart)}${order.bookedEnd ? ` → ${formatWhen(order.bookedEnd)}` : ''}`,
+    ],
+  ]
+  if (order.pendingRequest) {
+    rows.push([
+      'Pending request',
+      `${order.pendingRequest.kind} by ${order.pendingRequest.requestedByUserId} · ${formatWhen(order.pendingRequest.requestedAt)}`,
+    ])
   }
-
-  try {
-    const result = await apolloClient.query<AdminTaskByFilterQuery>({
-      query: AdminTaskByFilter,
-      variables: { filter: { id }, first: 1 },
-      fetchPolicy: 'network-only',
-    })
-    const task = result.data?.adminTasks?.[0]
-    if (task) {
-      return {
-        data: { task, dossier: null, source: 'adminTasks' },
-        banner:
-          'adminTask dossier is not on this Apollo yet (BE-43). Showing related records from adminTasks.',
-      }
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
+  for (const change of order.rescheduleHistory) {
+    rows.push([
+      'Rescheduled',
+      `${formatWhen(change.previousStart)} → ${formatWhen(change.start)} · by ${change.requestedByUserId}, confirmed ${formatWhen(change.confirmedAt)}`,
+    ])
   }
-
-  try {
-    const result = await apolloClient.query<TaskQuery>({
-      query: Task,
-      variables: { id },
-      fetchPolicy: 'network-only',
-    })
-    const task = result.data?.task
-    if (task) {
-      return {
-        data: { task, dossier: null, source: 'public' },
-        banner:
-          'Loaded via public task query. Related records may be incomplete until BE-43 adminTask is deployed.',
-      }
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  const result = await apolloClient.query<TaskCoreQuery>({
-    query: TaskCore,
-    variables: { id },
-    fetchPolicy: 'network-only',
-  })
-  const task = result.data?.task
-  if (!task) throw new Error('Task not found')
-  return {
-    data: {
-      task: task as DossierTask,
-      dossier: null,
-      source: 'public',
-    },
-    banner:
-      'Loaded core task fields only. Quotes, orders, and activity are unavailable on this API.',
-  }
+  if (order.autoDoneAt) rows.push(['Auto-Done', formatWhen(order.autoDoneAt)])
+  if (order.closedAt) rows.push(['Closed', formatWhen(order.closedAt)])
+  return (
+    <dl className="kv">
+      {rows.map(([label, value], index) => (
+        <div key={`${label}-${index}`}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
 }

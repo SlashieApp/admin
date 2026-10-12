@@ -1,5 +1,4 @@
 import { AdminOpsSummary } from '@/graphql/operations'
-import { isMissingAdminFieldError } from '@/lib/graphqlErrors'
 import { parseAdminOpsRange } from '@/lib/opsRange'
 import { DashboardReport } from '@/components/DashboardReport'
 import { getServerAuthToken } from '@/server/auth'
@@ -54,13 +53,6 @@ async function loadOpsSummary(
     )
     return { data: data.adminOpsSummary, banner: null }
   } catch (error) {
-    if (isMissingAdminFieldError(error)) {
-      return {
-        data: null,
-        banner:
-          'adminOpsSummary is not on this Apollo yet (BE-44). Mongo hard counts will appear when that API lands.',
-      }
-    }
     return {
       data: null,
       banner: error instanceof Error ? error.message : 'Failed to load ops summary',

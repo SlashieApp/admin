@@ -128,64 +128,45 @@ export type ActivityRow = {
   title: string
   body: string
   at: string
-  kind: 'notification' | 'timeline'
+  kind: 'flash' | 'timeline'
 }
 
-type NotificationLike = {
-  id?: string | null
+/** `AdminTaskActivity`: Messages flashes plus task timeline events (no chat messages). */
+type ActivityLike = {
   source?: string | null
   type?: string | null
   title?: string | null
   body?: string | null
   createdAt?: string | null
   actorUserId?: string | null
+  visibleToUserIds?: string[] | null
 }
 
-type TimelineLike = {
-  type?: string | null
-  timestamp?: string | null
-  actor?: Named | null
-}
-
-export function activityFromDossier(input: {
-  activity?: Array<NotificationLike | null | undefined> | null
-  timeline?: Array<TimelineLike | null | undefined> | null
-}): ActivityRow[] {
+export function activityFromDossier(
+  activity: Array<ActivityLike | null | undefined> | null | undefined,
+): ActivityRow[] {
   const rows: ActivityRow[] = []
-
-  for (const item of input.activity ?? []) {
+  for (const item of activity ?? []) {
     if (!item) continue
-    const source = String(item.source || '').toUpperCase()
     const kind: ActivityRow['kind'] =
-      source === 'TIMELINE' ? 'timeline' : 'notification'
+      String(item.source || '').toUpperCase() === 'FLASH' ? 'flash' : 'timeline'
+    const meta = [
+      item.actorUserId ? `Actor: ${item.actorUserId}` : '',
+      item.visibleToUserIds?.length
+        ? `Visible to: ${item.visibleToUserIds.join(', ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
     rows.push({
-      id: item.id || `${kind}-${item.type}-${item.createdAt}-${rows.length}`,
-      title: item.title?.trim() || item.type || 'Notification',
-      body:
-        item.body?.trim() ||
-        (item.actorUserId ? `Actor: ${item.actorUserId}` : ''),
+      id: `${kind}-${item.type}-${item.createdAt}-${rows.length}`,
+      title: item.title?.trim() || item.type || 'Activity',
+      body: [item.body?.trim(), meta].filter(Boolean).join(' · '),
       at: String(item.createdAt ?? ''),
       kind,
     })
   }
-
-  for (const event of input.timeline ?? []) {
-    if (!event) continue
-    const actor = displayName(event.actor)
-    rows.push({
-      id: `t-${event.type}-${event.timestamp}-${rows.length}`,
-      title: event.type || 'TASK_EVENT',
-      body: actor !== '—' ? `Actor: ${actor}` : '',
-      at: String(event.timestamp ?? ''),
-      kind: 'timeline',
-    })
-  }
-
-  return rows.sort((a, b) => {
-    const aTime = Date.parse(a.at) || 0
-    const bTime = Date.parse(b.at) || 0
-    return bTime - aTime
-  })
+  return rows.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))
 }
 
 export function formatWhen(value: unknown): string {

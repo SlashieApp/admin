@@ -27,7 +27,6 @@ type Props = {
   onOpen: (id: string) => void
   initialBbox: GeoBBox | null
   onBboxChange: (bbox: GeoBBox) => void
-  areaBrowseEnabled: boolean
 }
 
 function boundsToBBox(bounds: mapboxgl.LngLatBounds): GeoBBox {
@@ -55,7 +54,6 @@ export function TasksMap({
   onOpen,
   initialBbox,
   onBboxChange,
-  areaBrowseEnabled,
 }: Props) {
   const token = mapboxAccessToken()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -65,7 +63,6 @@ export function TasksMap({
   const onBboxChangeRef = useRef(onBboxChange)
   const onSelectRef = useRef(onSelect)
   const onOpenRef = useRef(onOpen)
-  const areaBrowseRef = useRef(areaBrowseEnabled)
   const didFitRef = useRef(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialBboxRef = useRef(initialBbox)
@@ -74,8 +71,7 @@ export function TasksMap({
     onBboxChangeRef.current = onBboxChange
     onSelectRef.current = onSelect
     onOpenRef.current = onOpen
-    areaBrowseRef.current = areaBrowseEnabled
-  }, [onBboxChange, onSelect, onOpen, areaBrowseEnabled])
+  }, [onBboxChange, onSelect, onOpen])
 
   useEffect(() => {
     const node = containerRef.current
@@ -114,7 +110,6 @@ export function TasksMap({
         ignoreMoveRef.current -= 1
         return
       }
-      if (!areaBrowseRef.current) return
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => {
         const bounds = map.getBounds()

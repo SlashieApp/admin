@@ -1,9 +1,5 @@
 import {
   DEFAULT_TABLE_PAGE_SIZE,
-  includesNormalized,
-  inDateRange,
-  pageLocalNotice,
-  parseDateInput,
   parseOptionalString,
   parsePageSize,
   parseSortDir,
@@ -20,7 +16,7 @@ export type ReportReason =
   | 'OTHER'
 
 export type ReportStatus = 'OPEN' | 'REVIEWED' | 'ACTIONED' | 'DISMISSED'
-export type ReportTargetType = 'TASK' | 'WORKER' | 'USER'
+export type ReportTargetType = 'TASK' | 'WORKER' | 'USER' | 'REVIEW' | 'MESSAGE'
 
 export const REPORT_PAGE_SIZE = 100
 export const MAX_REPORT_PAGES = 10
@@ -36,28 +32,16 @@ export const REPORT_TARGET_TYPES: ReportTargetType[] = [
   'TASK',
   'WORKER',
   'USER',
+  'REVIEW',
+  'MESSAGE',
 ]
 
 export type ReportStatusFilter = ReportStatus | 'ALL'
 export type ReportTargetTypeFilter = ReportTargetType | 'ALL'
 
-export const REPORT_REASONS: ReportReason[] = [
-  'SPAM',
-  'HARASSMENT',
-  'ILLEGAL_OR_PROHIBITED',
-  'SCAM',
-  'OTHER',
-]
-
-export type ReportReasonFilter = ReportReason | 'ALL'
-
 export type ReportListFilters = {
   status: ReportStatusFilter
   targetType: ReportTargetTypeFilter
-  reason: ReportReasonFilter
-  reporter: string
-  from: string
-  to: string
   after: string
   first: number
   sort: string
@@ -75,7 +59,7 @@ export type ReportRow = {
   createdAt: unknown
   updatedAt?: unknown
   reporterUserId: string
-  /** Live BE-46 field. Linked task title (or worker/user label). */
+  /** Snapshot at report time: task title, worker/user name, review stars, or message text. */
   targetLabel?: string | null
   reporterEmail?: string | null
   reporter?: {
@@ -83,24 +67,6 @@ export type ReportRow = {
     email: string
     profile?: { name?: string | null } | null
   } | null
-}
-
-export type ReportApiPayload = {
-  id: string
-  targetId: string
-  targetType: ReportTargetType
-  reason: ReportReason
-  details?: string | null
-  status: ReportStatus
-  targetUrl?: string | null
-  createdAt: unknown
-  updatedAt?: unknown
-  reporterUserId: string
-  targetLabel?: string | null
-  /** Stub used before BE-46 shipped `targetLabel`. */
-  targetTitle?: string | null
-  reporterEmail?: string | null
-  reporter?: ReportRow['reporter']
 }
 
 export type ReportPage = {
@@ -139,7 +105,9 @@ export function parseReportStatusFilter(
 export function parseReportTargetTypeFilter(
   value: string | null | undefined,
 ): ReportTargetTypeFilter {
-  if (value === 'ALL' || value === 'WORKER' || value === 'USER') return value
+  if (value === 'ALL' || REPORT_TARGET_TYPES.includes(value as ReportTargetType)) {
+    return value as ReportTargetTypeFilter
+  }
   return 'TASK'
 }
 
@@ -176,14 +144,6 @@ export function sortReportsOpenFirst(items: ReportRow[]): ReportRow[] {
   })
 }
 
-export function filterReportsByTargetType(
-  items: ReportRow[],
-  targetType: ReportTargetTypeFilter,
-): ReportRow[] {
-  if (targetType === 'ALL') return items
-  return items.filter((row) => row.targetType === targetType)
-}
-
 export function reportTargetHref(report: ReportRow): string | null {
   if (report.targetType === 'TASK') return `/tasks/${report.targetId}`
   if (report.targetType === 'USER') return `/users/${report.targetId}`
@@ -211,52 +171,6 @@ export function taskTitle(report: ReportRow): string {
   return `${report.targetType} ${report.targetId}`
 }
 
-export function reportFromApi(row: ReportApiPayload): ReportRow {
-  const targetLabel =
-    row.targetLabel?.trim() || row.targetTitle?.trim() || null
-  const reporterEmail =
-    row.reporterEmail?.trim() || row.reporter?.email?.trim() || null
-  return {
-    id: row.id,
-    targetId: row.targetId,
-    targetType: row.targetType,
-    reason: row.reason,
-    details: row.details,
-    status: row.status,
-    targetUrl: row.targetUrl,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    reporterUserId: row.reporterUserId,
-    targetLabel,
-    reporterEmail,
-    reporter: row.reporter ?? null,
-  }
-}
-
-/** Status mutations often return core fields only; keep list enrichment. */
-export function mergeReportRow(
-  current: ReportRow,
-  updated: ReportRow,
-): ReportRow {
-  return {
-    ...current,
-    ...updated,
-    targetLabel: updated.targetLabel || current.targetLabel,
-    reporterEmail: updated.reporterEmail || current.reporterEmail,
-    reporter: updated.reporter || current.reporter,
-    details: updated.details ?? current.details,
-    targetUrl: updated.targetUrl ?? current.targetUrl,
-  }
-}
-
-export function parseReportReasonFilter(
-  value: string | null | undefined,
-): ReportReasonFilter {
-  return REPORT_REASONS.includes(value as ReportReason)
-    ? (value as ReportReason)
-    : 'ALL'
-}
-
 export function reportFiltersFromForm(
   data: FormData,
   current: ReportListFilters,
@@ -265,10 +179,6 @@ export function reportFiltersFromForm(
     ...current,
     status: parseReportStatusFilter(String(data.get('status') ?? '')),
     targetType: parseReportTargetTypeFilter(String(data.get('targetType') ?? '')),
-    reason: parseReportReasonFilter(String(data.get('reason') ?? '')),
-    reporter: String(data.get('reporter') ?? '').trim(),
-    from: parseDateInput(String(data.get('from') ?? '')),
-    to: parseDateInput(String(data.get('to') ?? '')),
     after: '',
   }
 }
@@ -279,10 +189,6 @@ export function parseReportListFilters(
   return {
     status: parseReportStatusFilter(params.get('status')),
     targetType: parseReportTargetTypeFilter(params.get('targetType')),
-    reason: parseReportReasonFilter(params.get('reason')),
-    reporter: parseOptionalString(params.get('reporter')),
-    from: parseDateInput(params.get('from')),
-    to: parseDateInput(params.get('to')),
     after: parseOptionalString(params.get('after')),
     first: parsePageSize(params.get('first')),
     sort: parseOptionalString(params.get('sort')),
@@ -290,39 +196,12 @@ export function parseReportListFilters(
   }
 }
 
-export function reportPageLocalFields(filters: ReportListFilters): string[] {
-  const fields: string[] = []
-  if (filters.reason !== 'ALL') fields.push('Reason')
-  if (filters.reporter) fields.push('Reporter')
-  if (filters.from || filters.to) fields.push('Created date')
-  return fields
-}
-
-export function reportPageLocalNotice(filters: ReportListFilters): string | null {
-  return pageLocalNotice(reportPageLocalFields(filters))
-}
-
-export function refineReports<T extends ReportRow>(
+/** Sorts the fetched page only (column sort). Filters are all server-side. */
+export function sortReports<T extends ReportRow>(
   rows: T[],
   filters: ReportListFilters,
 ): T[] {
-  const filtered = rows.filter((row) => {
-    if (filters.reason !== 'ALL' && row.reason !== filters.reason) return false
-    if (filters.reporter) {
-      const blob = [
-        row.reporter?.profile?.name,
-        row.reporter?.email,
-        row.reporterEmail,
-        row.reporterUserId,
-      ]
-        .filter(Boolean)
-        .join(' ')
-      if (!includesNormalized(blob, filters.reporter)) return false
-    }
-    if (!inDateRange(row.createdAt, filters.from, filters.to)) return false
-    return true
-  })
-  return sortRows(filtered, filters.sort, filters.dir, reportSortValue)
+  return sortRows(rows, filters.sort, filters.dir, reportSortValue)
 }
 
 export function reportSortValue(row: ReportRow, key: string): unknown {
@@ -350,10 +229,6 @@ export function reportsPath(input: Partial<ReportListFilters> = {}): string {
   if (input.targetType && input.targetType !== 'TASK') {
     params.set('targetType', input.targetType)
   }
-  if (input.reason && input.reason !== 'ALL') params.set('reason', input.reason)
-  setParam(params, 'reporter', input.reporter)
-  setParam(params, 'from', input.from)
-  setParam(params, 'to', input.to)
   setParam(params, 'after', input.after)
   if (input.first && input.first !== DEFAULT_TABLE_PAGE_SIZE) {
     params.set('first', String(input.first))

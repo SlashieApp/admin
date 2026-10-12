@@ -15,18 +15,15 @@ import {
   updateAdminReportStatus,
 } from '@/lib/reportInbox'
 import {
-  mergeReportRow,
   parseReportListFilters,
-  refineReports,
   reportFiltersFromForm,
   reporterHref,
   reporterLabel,
-  reportPageLocalNotice,
   reportsPath,
   reportTargetHref,
-  REPORT_REASONS,
   REPORT_STATUSES,
   REPORT_TARGET_TYPES,
+  sortReports,
   taskTitle,
   type ReportListFilters,
   type ReportRow,
@@ -46,7 +43,6 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
   const [cursorStack, setCursorStack] = useState<string[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [banner, setBanner] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
 
@@ -55,7 +51,6 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
     async function load() {
       setBusy(true)
       setError(null)
-      setBanner(null)
       try {
         const result = await listAdminReports({
           status: filters.status,
@@ -65,8 +60,7 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
         })
         if (cancelled) return
         setRows(result.items)
-        setNextCursor(result.nextCursor)
-        setBanner(result.banner)
+        setNextCursor(result.nextCursor ?? null)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -91,9 +85,7 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
     try {
       const updated = await updateAdminReportStatus(id, next)
       setRows((current) =>
-        current.map((row) =>
-          row.id === id ? mergeReportRow(row, updated) : row,
-        ),
+        current.map((row) => (row.id === id ? updated : row)),
       )
     } catch (err) {
       setUpdateError(graphqlErrorMessage(err))
@@ -102,24 +94,14 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
     }
   }
 
-  const visible = refineReports(rows, filters)
-  const localNotice = reportPageLocalNotice(filters)
+  const visible = sortReports(rows, filters)
 
   const columns: DataColumn<ReportRow>[] = [
     {
       key: 'target',
       header: 'Target',
       sortKey: 'target',
-      render: (row) => {
-        const href = reportTargetHref(row)
-        return href ? (
-          <Link href={href} className="table-link">
-            {taskTitle(row)}
-          </Link>
-        ) : (
-          <strong>{taskTitle(row)}</strong>
-        )
-      },
+      render: (row) => <ReportTarget row={row} />,
     },
     {
       key: 'status',
@@ -184,8 +166,7 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
         <h1>Reports</h1>
         <p className="muted">
           Ops inbox for reported marketplace content. Default view is task
-          reports, all statuses, with open items first. Status and target type
-          are server filters; reason, reporter, and date refine this page.
+          reports, all statuses, with open items first.
         </p>
       </div>
 
@@ -228,48 +209,8 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
             <option value="ALL">All types</option>
           </select>
         </label>
-        <label className="field">
-          Reason
-          <select className="input" name="reason" defaultValue={filters.reason}>
-            <option value="ALL">All reasons</option>
-            {REPORT_REASONS.map((reason) => (
-              <option key={reason} value={reason}>
-                {reason}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Reporter
-          <input
-            className="input"
-            name="reporter"
-            defaultValue={filters.reporter}
-            placeholder="Name, email, or id"
-          />
-        </label>
-        <label className="field">
-          From
-          <input
-            className="input"
-            name="from"
-            type="date"
-            defaultValue={filters.from}
-          />
-        </label>
-        <label className="field">
-          To
-          <input
-            className="input"
-            name="to"
-            type="date"
-            defaultValue={filters.to}
-          />
-        </label>
       </FilterToolbar>
 
-      {banner ? <p className="banner banner-warn">{banner}</p> : null}
-      {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
       {updateError ? <p className="banner banner-error">{updateError}</p> : null}
 
@@ -315,18 +256,31 @@ function ReportsPanel({ filters }: { filters: ReportListFilters }) {
   )
 }
 
-function ReportCard({ row }: { row: ReportRow }) {
+/** Admin page for tasks/users; public Slashie page (targetUrl) for workers and reviews; plain text for messages. */
+function ReportTarget({ row }: { row: ReportRow }) {
   const href = reportTargetHref(row)
+  if (href) {
+    return (
+      <Link href={href} className="table-link">
+        {taskTitle(row)}
+      </Link>
+    )
+  }
+  if (row.targetUrl) {
+    return (
+      <a href={row.targetUrl} className="table-link" target="_blank" rel="noreferrer">
+        {taskTitle(row)}
+      </a>
+    )
+  }
+  return <strong>{taskTitle(row)}</strong>
+}
+
+function ReportCard({ row }: { row: ReportRow }) {
   return (
     <>
       <div className="card-top">
-        {href ? (
-          <Link href={href} className="table-link">
-            {taskTitle(row)}
-          </Link>
-        ) : (
-          <strong>{taskTitle(row)}</strong>
-        )}
+        <ReportTarget row={row} />
         <span className={row.status === 'OPEN' ? 'pill pill-warn' : 'pill'}>
           {row.status}
         </span>

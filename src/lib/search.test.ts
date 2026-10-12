@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DEFAULT_ADMIN_PAGE_SIZE,
-  parseAdminHomeMode,
   toAdminTaskListVariables,
-  toAdminTaskVariables,
   toAdminUserListVariables,
 } from './search'
 
@@ -14,9 +12,6 @@ describe('toAdminTaskListVariables', () => {
       first: DEFAULT_ADMIN_PAGE_SIZE,
     })
     expect(toAdminTaskListVariables('   ')).toEqual({
-      first: DEFAULT_ADMIN_PAGE_SIZE,
-    })
-    expect(toAdminTaskVariables('')).toEqual({
       first: DEFAULT_ADMIN_PAGE_SIZE,
     })
   })
@@ -59,18 +54,5 @@ describe('toAdminUserListVariables', () => {
       search: '507f1f77bcf86cd799439011',
       id: '507f1f77bcf86cd799439011',
     })
-  })
-})
-
-describe('parseAdminHomeMode', () => {
-  it('defaults to tasks', () => {
-    expect(parseAdminHomeMode(null)).toBe('tasks')
-    expect(parseAdminHomeMode(undefined)).toBe('tasks')
-    expect(parseAdminHomeMode('nope')).toBe('tasks')
-  })
-
-  it('accepts users and ignores the old workers tab', () => {
-    expect(parseAdminHomeMode('users')).toBe('users')
-    expect(parseAdminHomeMode('workers')).toBe('tasks')
   })
 })

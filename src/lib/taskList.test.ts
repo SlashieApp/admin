@@ -1,20 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import {
-  markBBoxFilterUnsupported,
   parseTaskListFilters,
-  refineTasks,
-  resetBBoxFilterSupportForTests,
+  sortTasks,
+  TASK_STATUSES,
   taskFiltersFromForm,
   taskListPath,
-  taskPageLocalFields,
   toTaskListQueryVariables,
   type TaskListRow,
 } from './taskList'
-
-beforeEach(() => {
-  resetBBoxFilterSupportForTests()
-})
 
 function params(query: string) {
   return new URLSearchParams(query)
@@ -75,6 +69,30 @@ describe('toTaskListQueryVariables', () => {
     })
   })
 
+  it('sends every toolbar filter to adminTasks, with created-date bounds in UTC', () => {
+    expect(
+      toTaskListQueryVariables(
+        parseTaskListFilters(
+          params(
+            'category=PLUMBING&poster=pat&budgetMin=20&budgetMax=100&budgetType=ONE_OFF&from=2026-09-01&to=2026-09-30&after=c2',
+          ),
+        ),
+      ),
+    ).toEqual({
+      first: 25,
+      after: 'c2',
+      filter: {
+        category: 'PLUMBING',
+        posterSearch: 'pat',
+        budgetMin: 20,
+        budgetMax: 100,
+        budgetType: 'ONE_OFF',
+        createdAfter: '2026-09-01T00:00:00.000Z',
+        createdBefore: '2026-09-30T23:59:59.999Z',
+      },
+    })
+  })
+
   it('omits filter when only page size is set', () => {
     expect(toTaskListQueryVariables(parseTaskListFilters(params('')))).toEqual({
       first: 25,
@@ -82,50 +100,20 @@ describe('toTaskListQueryVariables', () => {
   })
 })
 
-describe('refineTasks', () => {
-  const rows = [
-    task({ id: '1' }),
-    task({
-      id: '2',
-      title: 'Garden tidy',
-      category: 'GARDENING',
-      status: 'COMPLETED',
-      budget: { amount: 200, currency: 'GBP', type: 'PER_DAY' },
-      poster: { id: 'u2', email: 'lee@x.com', profile: { name: 'Lee' } },
-      datetime: { date: '2026-08-01' },
-    }),
-  ]
-
-  it('filters poster, category, budget, and job date on the current page', () => {
+describe('sortTasks', () => {
+  it('sorts the fetched page', () => {
+    const rows = [task({ id: '1' }), task({ id: '2', title: 'Garden tidy' })]
     expect(
-      refineTasks(rows, parseTaskListFilters(params('poster=pat'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['1'])
-    expect(
-      refineTasks(rows, parseTaskListFilters(params('category=garden'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['2'])
-    expect(
-      refineTasks(rows, parseTaskListFilters(params('budgetMax=100'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['1'])
-    expect(
-      refineTasks(
-        rows,
-        parseTaskListFilters(params('from=2026-09-01&to=2026-09-30')),
-      ).map((row) => row.id),
-    ).toEqual(['1'])
-  })
-
-  it('sorts the current page', () => {
-    expect(
-      refineTasks(rows, parseTaskListFilters(params('sort=title&dir=asc'))).map(
+      sortTasks(rows, parseTaskListFilters(params('sort=title&dir=asc'))).map(
         (row) => row.id,
       ),
     ).toEqual(['2', '1'])
+  })
+})
+
+describe('TASK_STATUSES', () => {
+  it('matches the live TaskStatus enum (job completion lives on Order)', () => {
+    expect(TASK_STATUSES).toEqual(['DRAFT', 'OPEN', 'AWARDED', 'CANCELLED'])
   })
 })
 
@@ -134,6 +122,9 @@ describe('taskListPath', () => {
     expect(taskListPath({})).toBe('/')
     expect(taskListPath({ q: 'tap', status: 'OPEN', first: 50 })).toBe(
       '/?q=tap&status=OPEN&first=50',
+    )
+    expect(taskListPath({ status: 'OPEN', after: 'c2' })).toBe(
+      '/?status=OPEN&after=c2',
     )
   })
 })
@@ -155,17 +146,6 @@ describe('taskFiltersFromForm', () => {
   })
 })
 
-describe('taskPageLocalFields', () => {
-  it('lists filters the API cannot apply', () => {
-    expect(taskPageLocalFields(parseTaskListFilters(params('q=tap')))).toEqual(
-      [],
-    )
-    expect(
-      taskPageLocalFields(parseTaskListFilters(params('category=PLUMBING&poster=pat'))),
-    ).toEqual(['Category', 'Poster'])
-  })
-})
-
 describe('bbox filter', () => {
   it('parses and serializes the map viewport', () => {
     const filters = parseTaskListFilters(
@@ -182,7 +162,7 @@ describe('bbox filter', () => {
     )
   })
 
-  it('sends bbox on adminTasks until BE-49 is known missing', () => {
+  it('sends bbox on adminTasks', () => {
     expect(
       toTaskListQueryVariables(
         parseTaskListFilters(params('bbox=51.4,-0.2,51.6,0.1')),
@@ -193,11 +173,5 @@ describe('bbox filter', () => {
         bbox: { swLat: 51.4, swLng: -0.2, neLat: 51.6, neLng: 0.1 },
       },
     })
-    markBBoxFilterUnsupported()
-    expect(
-      toTaskListQueryVariables(
-        parseTaskListFilters(params('bbox=51.4,-0.2,51.6,0.1')),
-      ),
-    ).toEqual({ first: 25 })
   })
 })

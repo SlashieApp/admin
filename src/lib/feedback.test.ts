@@ -8,13 +8,12 @@ import {
   feedbackMailto,
   feedbackPath,
   feedbackPreview,
-  mergeFeedbackRow,
   parseFeedbackCategoryFilter,
   parseFeedbackId,
   parseFeedbackListFilters,
   parseFeedbackStatusFilter,
   ratingLabel,
-  refineFeedbacks,
+  sortFeedbacks,
   sortFeedbacksOpenFirst,
   submitterHref,
   submitterLabel,
@@ -199,26 +198,6 @@ describe('feedbackFromApi', () => {
   })
 })
 
-describe('mergeFeedbackRow', () => {
-  it('keeps message and submitter after a core status update', () => {
-    const current = feedback({
-      id: 'f1',
-      name: 'Sam',
-      email: 'sam@x.com',
-      message: 'Please add dark mode.',
-      pageUrl: 'https://slashie.app/dashboard',
-    })
-    const merged = mergeFeedbackRow(
-      current,
-      feedback({ id: 'f1', status: 'REVIEWED', message: '' }),
-    )
-    expect(merged.status).toBe('REVIEWED')
-    expect(merged.message).toBe('Please add dark mode.')
-    expect(merged.name).toBe('Sam')
-    expect(merged.pageUrl).toBe('https://slashie.app/dashboard')
-  })
-})
-
 describe('feedbackPath', () => {
   it('omits default all-status / all-category query params', () => {
     expect(feedbackPath({})).toBe('/feedback')
@@ -226,44 +205,22 @@ describe('feedbackPath', () => {
     expect(
       feedbackPath({ status: 'OPEN', category: 'BUG', id: 'f9' }),
     ).toBe('/feedback?status=OPEN&category=BUG&id=f9')
-    expect(
-      feedbackPath({
-        status: 'OPEN',
-        email: 'pat@x.com',
-        rating: 4,
-        after: 'c1',
-      }),
-    ).toBe('/feedback?status=OPEN&email=pat%40x.com&rating=4&after=c1')
+    expect(feedbackPath({ status: 'OPEN', after: 'c1' })).toBe(
+      '/feedback?status=OPEN&after=c1',
+    )
   })
 })
 
-describe('refineFeedbacks', () => {
-  it('filters email, rating, free text, and date on the current page', () => {
+describe('sortFeedbacks', () => {
+  it('sorts the fetched page by column', () => {
     const rows = [
-      feedback({
-        id: '1',
-        email: 'pat@x.com',
-        rating: 5,
-        message: 'Great quotes',
-      }),
-      feedback({
-        id: '2',
-        email: 'lee@x.com',
-        rating: 2,
-        message: 'Bug on map',
-        createdAt: '2026-08-01T00:00:00.000Z',
-      }),
+      feedback({ id: '1', rating: 2 }),
+      feedback({ id: '2', rating: 5 }),
     ]
     const filters = parseFeedbackListFilters(
-      new URLSearchParams('email=pat&rating=5&q=quotes'),
+      new URLSearchParams('sort=rating&dir=desc'),
     )
-    expect(refineFeedbacks(rows, filters).map((row) => row.id)).toEqual(['1'])
-    expect(
-      refineFeedbacks(
-        rows,
-        parseFeedbackListFilters(new URLSearchParams('from=2026-09-01')),
-      ).map((row) => row.id),
-    ).toEqual(['1'])
+    expect(sortFeedbacks(rows, filters).map((row) => row.id)).toEqual(['2', '1'])
   })
 })
 

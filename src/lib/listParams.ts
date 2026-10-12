@@ -49,44 +49,14 @@ export function triStateToParam(value: TriState): string | null {
   return null
 }
 
-export function includesNormalized(
-  haystack: string | null | undefined,
-  needle: string,
-): boolean {
-  const query = needle.trim().toLowerCase()
-  if (!query) return true
-  return (haystack ?? '').toLowerCase().includes(query)
+/** Start of a YYYY-MM-DD day in UTC, for inclusive `createdAfter` API bounds. */
+export function dayStartIso(day: string): string | undefined {
+  return day ? `${day}T00:00:00.000Z` : undefined
 }
 
-export function timestampMs(value: unknown): number {
-  if (value == null || value === '') return 0
-  const raw = String(value).trim()
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const day = Date.parse(`${raw}T00:00:00.000Z`)
-    return Number.isNaN(day) ? 0 : day
-  }
-  const ms = Date.parse(raw)
-  return Number.isNaN(ms) ? 0 : ms
-}
-
-/** Inclusive calendar-day range in UTC. Empty bounds are ignored. */
-export function inDateRange(
-  value: unknown,
-  from: string,
-  to: string,
-): boolean {
-  if (!from && !to) return true
-  const ms = timestampMs(value)
-  if (!ms) return false
-  if (from) {
-    const start = timestampMs(from)
-    if (start && ms < start) return false
-  }
-  if (to) {
-    const end = Date.parse(`${to}T23:59:59.999Z`)
-    if (!Number.isNaN(end) && ms > end) return false
-  }
-  return true
+/** End of a YYYY-MM-DD day in UTC, for inclusive `createdBefore` API bounds. */
+export function dayEndIso(day: string): string | undefined {
+  return day ? `${day}T23:59:59.999Z` : undefined
 }
 
 export function compareValues(
@@ -119,10 +89,6 @@ export function sortRows<T>(
   )
 }
 
-export function pageLocalNotice(fields: string[]): string | null {
-  if (fields.length === 0) return null
-  return `${fields.join(', ')} refine this server page only — not a full-index filter.`
-}
 
 export function nextSort(
   currentSort: string,

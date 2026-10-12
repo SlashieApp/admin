@@ -8,15 +8,6 @@ import {
 
 export const TASK_STATUSES = Object.values(TaskStatus)
 
-export const TASK_CATEGORIES = [
-  'GENERAL',
-  'DELIVERY',
-  'HANDYMAN',
-  'TECH_SETUP',
-  'CLEANING',
-  'MOVING',
-] as const
-
 export type TaskEditFormValues = {
   title: string
   description: string

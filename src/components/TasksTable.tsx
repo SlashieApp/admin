@@ -8,33 +8,25 @@ import { useEffect, useMemo, useState } from 'react'
 import { DataTable, type DataColumn } from '@/components/DataTable'
 import { FilterToolbar } from '@/components/FilterToolbar'
 import { TablePager } from '@/components/TablePager'
-import { AdminTasks, Tasks } from '@/graphql/operations'
+import { AdminTasks } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatMoney } from '@/lib/dossier'
 import { bboxesEqual, taskCoordinates } from '@/lib/geo'
-import {
-  graphqlErrorMessage,
-  isMissingAdminFieldError,
-  isUnknownFilterFieldError,
-} from '@/lib/graphqlErrors'
+import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import { nextSort } from '@/lib/listParams'
 import {
-  BBOX_UNSUPPORTED_NOTICE,
-  isBBoxFilterUnsupported,
-  markBBoxFilterUnsupported,
-  refineTasks,
+  sortTasks,
   TASK_BUDGET_TYPES,
   TASK_CATEGORIES,
   TASK_STATUSES,
   taskFiltersFromForm,
   taskListPath,
-  taskPageLocalNotice,
   parseTaskListFilters,
   toTaskListQueryVariables,
   type TaskListFilters,
   type TaskListRow,
 } from '@/lib/taskList'
-import type { AdminTasksQuery, TasksQuery } from '@codegen/schema'
+import type { AdminTasksQuery } from '@codegen/schema'
 
 const TasksMap = dynamic(
   () => import('@/components/TasksMap').then((mod) => mod.TasksMap),
@@ -46,7 +38,7 @@ const TasksMap = dynamic(
   },
 )
 
-type TaskHit = AdminTasksQuery['adminTasks'][number]
+type TaskHit = AdminTasksQuery['adminTasks']['items'][number]
 
 export function TasksTable() {
   const params = useSearchParams()
@@ -54,28 +46,25 @@ export function TasksTable() {
   const filters = useMemo(() => parseTaskListFilters(params), [params])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [banner, setBanner] = useState<string | null>(null)
   const [rows, setRows] = useState<TaskHit[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [cursorStack, setCursorStack] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [bboxUnsupported, setBboxUnsupported] = useState(
-    isBBoxFilterUnsupported(),
-  )
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setBusy(true)
       setError(null)
-      setBanner(null)
       try {
-        const result = await listTasks(filters)
+        const result = await apolloClient.query<AdminTasksQuery>({
+          query: AdminTasks,
+          variables: toTaskListQueryVariables(filters),
+          fetchPolicy: 'network-only',
+        })
         if (cancelled) return
-        setRows(result.rows)
-        setBanner(result.banner)
-        setBboxUnsupported(isBBoxFilterUnsupported())
-        if (filters.bbox && isBBoxFilterUnsupported()) {
-          router.replace(taskListPath({ ...filters, bbox: null }))
-        }
+        setRows(result.data?.adminTasks.items ?? [])
+        setNextCursor(result.data?.adminTasks.nextCursor ?? null)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -86,15 +75,15 @@ export function TasksTable() {
     return () => {
       cancelled = true
     }
-  }, [filters, router])
+  }, [filters])
 
-  function go(next: Partial<TaskListFilters>) {
-    router.push(taskListPath({ ...filters, ...next }))
+  function go(next: Partial<TaskListFilters>, keepAfter = false) {
+    const merged = { ...filters, ...next }
+    if (!keepAfter && next.after === undefined) merged.after = ''
+    router.push(taskListPath(merged))
   }
 
-  const visible = refineTasks(rows, filters)
-  const localNotice = taskPageLocalNotice(filters)
-  const truncated = !busy && rows.length >= filters.first
+  const visible = sortTasks(rows, filters)
   const pins = useMemo(
     () =>
       visible.flatMap((task) => {
@@ -205,10 +194,8 @@ export function TasksTable() {
       <div className="page-intro">
         <h1>Tasks</h1>
         <p className="muted">
-          Marketplace tasks with shareable filters and a Mapbox pin map. Search,
-          status, visibility, and viewport bbox go to <code>adminTasks</code>{' '}
-          when the API supports them. Other filters refine the current server
-          page until cursor pagination lands.
+          Marketplace tasks with shareable filters and a Mapbox pin map. Pan or
+          zoom the map to browse an area.
         </p>
       </div>
 
@@ -217,9 +204,13 @@ export function TasksTable() {
         busy={busy}
         onSubmit={(event) => {
           event.preventDefault()
+          setCursorStack([])
           go(taskFiltersFromForm(new FormData(event.currentTarget), filters))
         }}
-        onClear={() => router.push('/')}
+        onClear={() => {
+          setCursorStack([])
+          router.push('/')
+        }}
       >
         <label className="field field-wide">
           Title / id
@@ -316,7 +307,7 @@ export function TasksTable() {
           </select>
         </label>
         <label className="field">
-          Job date from
+          Created from
           <input
             className="input"
             name="from"
@@ -325,7 +316,7 @@ export function TasksTable() {
           />
         </label>
         <label className="field">
-          Job date to
+          Created to
           <input
             className="input"
             name="to"
@@ -335,33 +326,6 @@ export function TasksTable() {
         </label>
       </FilterToolbar>
 
-      {banner ? <p className="banner banner-warn">{banner}</p> : null}
-      {bboxUnsupported ? (
-        <p className="banner banner-warn">
-          {BBOX_UNSUPPORTED_NOTICE}{' '}
-          <a
-            className="inline-link"
-            href="https://linear.app/slashie/issue/BE-49/admin-api-cursor-pages-richer-filters-for-admintasksadminusersinbox"
-          >
-            BE-49
-          </a>
-          .
-        </p>
-      ) : null}
-      {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
-      {truncated ? (
-        <p className="banner banner-warn">
-          Showing the first {filters.first} matching server rows.{' '}
-          <code>adminTasks</code> has no cursor yet —{' '}
-          <a
-            className="inline-link"
-            href="https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback"
-          >
-            BE-50
-          </a>
-          .
-        </p>
-      ) : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
       <TasksMap
@@ -370,10 +334,10 @@ export function TasksTable() {
         onSelect={setSelectedId}
         onOpen={(id) => router.push(`/tasks/${id}`)}
         initialBbox={filters.bbox}
-        areaBrowseEnabled={!bboxUnsupported}
         onBboxChange={(bbox) => {
-          if (bboxUnsupported || bboxesEqual(bbox, filters.bbox)) return
-          router.replace(taskListPath({ ...filters, bbox }))
+          if (bboxesEqual(bbox, filters.bbox)) return
+          setCursorStack([])
+          router.replace(taskListPath({ ...filters, bbox, after: '' }))
         }}
       />
 
@@ -383,7 +347,7 @@ export function TasksTable() {
         rowKey={(task) => task.id}
         sort={filters.sort}
         dir={filters.dir}
-        onSort={(key) => go(nextSort(filters.sort, filters.dir, key))}
+        onSort={(key) => go(nextSort(filters.sort, filters.dir, key), true)}
         loading={busy}
         empty="No tasks for this filter."
         selectedKey={selectedId}
@@ -394,8 +358,26 @@ export function TasksTable() {
             shown={visible.length}
             fetched={rows.length}
             pageSize={filters.first}
-            onPageSize={(first) => go({ first })}
-            note={truncated ? 'end of this request' : null}
+            hasNext={Boolean(nextCursor)}
+            hasPrev={Boolean(filters.after)}
+            onPageSize={(first) => {
+              setCursorStack([])
+              go({ first })
+            }}
+            onNext={() => {
+              if (!nextCursor) return
+              setCursorStack((stack) => [...stack, filters.after])
+              go({ after: nextCursor }, true)
+            }}
+            onPrev={() => {
+              const prev = cursorStack.at(-1) ?? ''
+              setCursorStack((stack) => stack.slice(0, -1))
+              go({ after: prev }, true)
+            }}
+            onFirst={() => {
+              setCursorStack([])
+              go({})
+            }}
           />
         }
       />
@@ -419,37 +401,4 @@ function TaskCard({ task }: { task: TaskListRow }) {
       </p>
     </>
   )
-}
-
-async function listTasks(filters: TaskListFilters): Promise<{
-  rows: TaskHit[]
-  banner: string | null
-}> {
-  const vars = toTaskListQueryVariables(filters)
-  const sentBbox = Boolean(vars.filter?.bbox)
-  try {
-    const result = await apolloClient.query<AdminTasksQuery>({
-      query: AdminTasks,
-      variables: vars,
-      fetchPolicy: 'network-only',
-    })
-    return { rows: result.data?.adminTasks ?? [], banner: null }
-  } catch (error) {
-    if (sentBbox && isUnknownFilterFieldError(error)) {
-      markBBoxFilterUnsupported()
-      return listTasks({ ...filters, bbox: null })
-    }
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  const result = await apolloClient.query<TasksQuery>({
-    query: Tasks,
-    variables: filters.q.trim() ? { filter: { search: filters.q.trim() } } : {},
-    fetchPolicy: 'network-only',
-  })
-  return {
-    rows: result.data?.tasks ?? [],
-    banner:
-      'BE-42 adminTasks is not on this Apollo yet. Showing public marketplace tasks instead.',
-  }
 }

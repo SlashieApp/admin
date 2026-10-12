@@ -2,7 +2,7 @@
 
 Private ops panel for the Slashie marketplace. Google sign-in, dashboard, auto-loaded task list, user search/management, and god-mode task edits via Apollo `@admin` APIs ([BE-42](https://linear.app/slashie/issue/BE-42), [BE-43](https://linear.app/slashie/issue/BE-43), [BE-44](https://linear.app/slashie/issue/BE-44)).
 
-Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links).
+Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links), [FE-203](https://linear.app/slashie/issue/FE-203/fix-admin-panel-api-out-of-sync-panel-too-old).
 
 ## Stack
 
@@ -18,44 +18,42 @@ Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-
 2. The Google ID token email is checked **before** calling Apollo. Anything that does not end with `@slashie.app` is sent to **Not an admin** and never exchanged for a marketplace JWT.
 3. Allowed emails (primary: `admin@slashie.app`) call `loginWithMethod`, store the Apollo JWT in the `auth` cookie, and send `Authorization: Bearer <token>` on GraphQL requests.
 4. Apollo still enforces `@admin` + Admin collection + `@slashie.app`.
+5. Apollo links a Google login to an existing account only when that account's email is already verified. On `OAUTH_LINK_REQUIRES_VERIFIED_EMAIL` the login screen tells the admin to sign in on slashie.app with their password and verify the email once.
 
 Add this app’s origin (local + Vercel) to the Google OAuth client’s **Authorized JavaScript origins**. Reusing the web client ID is fine.
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters (`/?mode=users` redirects to `/users`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link.
+**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters. Users covers workers too (Worker filter = `isWorker`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link.
 
 ## GraphQL
 
-Operations live in `src/graphql/operations.ts`. Types are generated from the live Apollo SDL (`${NEXT_PUBLIC_GRAPHQL_URL}/schema`) when `SCHEMA_ACCESS_TOKEN` is set, otherwise from `schema/admin.graphql` (BE-43/44 contract aligned with production).
+Operations live in `src/graphql/operations.ts`, one per screen, matching the live Apollo schema. There are no fallback queries: if an `@admin` field is missing or changed, the screen shows the API error. Fix the operation or open a `BE-*` ticket; do not work around it in the panel.
 
-| Operation | Signature |
+`schema/admin.graphql` is a committed snapshot of the live SDL (`${NEXT_PUBLIC_GRAPHQL_URL}/schema` with `X-Schema-Token`). `bun run codegen` uses the live SDL when `SCHEMA_ACCESS_TOKEN` is set, otherwise the snapshot. `src/graphql/operations.test.ts` validates every operation against the snapshot, so refresh it whenever apollo changes:
+
+```bash
+set -a; source .env; set +a
+curl -sf -H "X-Schema-Token: $SCHEMA_ACCESS_TOKEN" "$NEXT_PUBLIC_GRAPHQL_URL/schema" -o schema/admin.graphql
+bun run codegen && bun run test
+```
+
+| Operation | Used by |
 | --- | --- |
-| `adminTasks` | `(filter: AdminTaskFilter, first: Int = 50): [Task!]!` |
-| `adminTask` | `(id: ID!): AdminTaskDossier!` |
-| `adminUsers` | `(search: String, id: ID, first: Int = 50): [User!]!` |
-| `adminOpsSummary` | `(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!` |
-| `adminUpdateTask` | `(id: ID!, input: AdminUpdateTaskInput!): Task!` |
-| `adminUpdateUser` | `(id: ID!, input: AdminUpdateUserInput!): User!` |
-| `adminSetUserDisabled` | `(id: ID!, disabled: Boolean!): User!` |
-| `adminReports` | `(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!` |
-| `adminUpdateReportStatus` | `(id: ID!, status: ReportStatus!): Report!` |
-| `adminFeedbackSummary` | `: AdminFeedbackSummary!` |
-| `adminFeedbacks` | `(status: FeedbackStatus, category: FeedbackCategory, first: Int = 50, after: String): FeedbackPage!` |
-| `adminUpdateFeedbackStatus` | `(id: ID!, status: FeedbackStatus!): Feedback!` |
-| `adminFeedbackDraftReply` | `(id: ID!): AdminFeedbackDraftReply!` |
+| `adminTasks(filter: AdminTaskFilter, first, after): TaskPage` | Tasks table + map, edit form (by id) |
+| `adminTask(id): AdminTaskDossier` | Task dossier (task, poster, workers, quotes, orders, activity) |
+| `adminUsers(search, id, disabled, isWorker, createdAfter, createdBefore, first, after): UserPage` | Users table, user detail (with `tasksPosted`) |
+| `adminOpsSummary(range): AdminOpsSummary` | Dashboard |
+| `adminUpdateTask`, `adminUpdateUser`, `adminSetUserDisabled` | God-mode edits |
+| `adminReports(status, targetType, first, after): ReportPage` / `adminUpdateReportStatus` | Reports inbox |
+| `adminFeedbackSummary`, `adminFeedbacks(status, category, first, after)`, `adminUpdateFeedbackStatus`, `adminFeedbackDraftReply` (query) | Feedback inbox |
 
-`AdminTaskFilter`: `search`, `id`, `status`, `hidden`, plus scaffolded BE-49 `bbox` (`swLat`/`swLng`/`neLat`/`neLng`). Other proposed BE-49 fields (`category`, poster, budget, created range, cursor pages) are documented on the local schema but not sent until Apollo accepts them. If `bbox` is rejected, the Tasks map shows pins for the current filter page and a banner.
+Every list filter is sent to the API and lists page with `after` / `nextCursor`. Column sort orders the fetched page only. The panel has no filter the API cannot apply.
 
-List UX (FE-170): Tasks / Users / Feedback / Reports use compact tables, a filter toolbar, and URL query params. Feedback and Reports page with the existing `after` cursor. `adminTasks` / `adminUsers` only expose `first` (no cursor) — the panel shows that page and does **not** invent page-2 from a truncated list. Extra filters the API cannot apply (task category/poster/budget/job date; user disabled/worker/created; feedback email/rating/free-text/date; report reason/reporter/date) refine the current server page and show a warning. Companion BE follow-up: [BE-50](https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback). Task has no `createdAt`, so the tasks date filter is job date (`datetime.date`).
-
-`AdminOpsRange`: `LAST_7_DAYS` | `LAST_30_DAYS` | `THIS_MONTH` | `LAST_MONTH`. Empty/omitted `adminTasks` filter returns the latest page of tasks (default `first` 50). Same for `adminUsers` with empty search.
-
-Default inbox: omit `status`, pass `targetType: TASK`. The panel shows OPEN first. Report cards use BE-46 `targetLabel` (task title) and `reporter` / `reporterEmail`. If BE-46 fields are missing, it falls back to BE-40 `reports` / `updateReportStatus` (env allowlist) with a banner.
-
-`/feedback` uses BE-48 `adminFeedbackSummary` + `adminFeedbacks` (newest first; panel OPEN-first when status=ALL) and `adminUpdateFeedbackStatus`. Selecting an item calls `adminFeedbackDraftReply` and shows subject/body with Copy + optional `mailto:`. The panel does not send the personalized reply. If optional fields like `path` are missing, the inbox retries a core selection. Banner if the `@admin` fields are not on Apollo yet.
-
-If BE-43/44 fields are not on the pointed-at API yet, the panel shows a banner and falls back where it can. User search/management and Mongo ops counts have no public fallback.
+- **Tasks**: search, status (`DRAFT | OPEN | AWARDED | CANCELLED`), hidden, category, poster (`posterSearch`), budget min/max/type, created date range, map viewport `bbox`. Job completion lives on `Order.status`, not the task.
+- **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`); chat messages are not included.
+- **Reports**: status and target type (`TASK | WORKER | USER | REVIEW | MESSAGE`). Tasks and users link inside admin; workers and reviews link to the public `targetUrl`; `MESSAGE` rows show the reported text (`targetLabel`, no URL).
+- **Feedback**: status and category. Selecting an item loads `adminFeedbackDraftReply` (subject/body with Copy + optional `mailto:`). The panel does not send the reply.
 
 ## PostHog
 

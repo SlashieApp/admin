@@ -16,6 +16,12 @@ import { googleClientId, isGoogleAuthConfigured } from '@/lib/env'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import type { LoginWithGoogleMutation } from '@codegen/schema'
 
+/** Apollo `loginWithMethod` error codes that need a readable next step. */
+const LOGIN_ERROR_MESSAGES: Record<string, string> = {
+  OAUTH_LINK_REQUIRES_VERIFIED_EMAIL:
+    'This Google account matches a Slashie account whose email is not verified yet. Sign in on slashie.app with your password and verify your email once, then use Google here.',
+}
+
 export function GoogleSignIn() {
   const router = useRouter()
   const { loginWithApolloToken } = useAuth()
@@ -52,7 +58,8 @@ export function GoogleSignIn() {
           router.push('/forbidden')
           return
         }
-        setError(graphqlErrorMessage(err))
+        const message = graphqlErrorMessage(err)
+        setError(LOGIN_ERROR_MESSAGES[message] ?? message)
       } finally {
         setBusy(false)
       }

@@ -39,7 +39,6 @@ const USER_ADMIN_FIELDS = gql`
       name
       contactNumber
       avatarUrl
-      bio
     }
     worker {
       id
@@ -106,105 +105,6 @@ const TASK_LIST_FIELDS = gql`
   }
 `
 
-const TASK_DOSSIER_FIELDS = gql`
-  fragment TaskDossierFields on Task {
-    id
-    title
-    description
-    category
-    status
-    views
-    hidden
-    datetime {
-      date
-      time
-      type
-    }
-    budget {
-      amount
-      currency
-      type
-      paymentMethod
-    }
-    location {
-      lat
-      lng
-      name
-      address
-    }
-    poster {
-      id
-      email
-      emailVerified
-      phoneVerified
-      createdAt
-      profile {
-        name
-        contactNumber
-        avatarUrl
-        bio
-      }
-      worker {
-        id
-        legalName
-        isVerified
-        profile {
-          name
-        }
-      }
-    }
-    quotes {
-      id
-      status
-      message
-      createdAt
-      price {
-        amount
-        currency
-      }
-      worker {
-        id
-        email
-        profile {
-          name
-          avatarUrl
-        }
-        worker {
-          id
-          legalName
-          isVerified
-          profile {
-            name
-          }
-        }
-      }
-    }
-    orders {
-      id
-      status
-      createdAt
-      workerUserId
-      customerUserId
-      quoteId
-      agreedPrice {
-        amount
-        currency
-      }
-    }
-    timeline {
-      type
-      timestamp
-      actor {
-        id
-        email
-        profile {
-          name
-        }
-      }
-    }
-  }
-`
-
 const WORKER_FIELDS = gql`
   fragment WorkerAdminFields on worker {
     id
@@ -218,13 +118,11 @@ const WORKER_FIELDS = gql`
     identityVerification
     skills
     qualifications
-    tasksCompletedCount
     quotesSentCount
     phoneVerified
     emailVerified
     memberSince
     serviceAreaLabel
-    averageResponseTime
     profile {
       name
       avatarUrl
@@ -253,7 +151,7 @@ const WORKER_FIELDS = gql`
 const ADMIN_TASK_DOSSIER = gql`
   fragment AdminTaskDossierFields on AdminTaskDossier {
     task {
-      ...TaskDossierFields
+      ...TaskListFields
     }
     poster {
       ...UserAdminFields
@@ -297,6 +195,21 @@ const ADMIN_TASK_DOSSIER = gql`
         amount
         currency
       }
+      bookedStart
+      bookedEnd
+      autoDoneAt
+      closedAt
+      pendingRequest {
+        kind
+        requestedByUserId
+        requestedAt
+      }
+      rescheduleHistory {
+        previousStart
+        start
+        requestedByUserId
+        confirmedAt
+      }
     }
     activity {
       source
@@ -305,7 +218,7 @@ const ADMIN_TASK_DOSSIER = gql`
       body
       createdAt
       actorUserId
-      recipientUserId
+      visibleToUserIds
       quoteId
       orderId
     }
@@ -314,15 +227,18 @@ const ADMIN_TASK_DOSSIER = gql`
 
 export const AdminTasks = gql`
   ${TASK_LIST_FIELDS}
-  query AdminTasks($filter: AdminTaskFilter, $first: Int) {
-    adminTasks(filter: $filter, first: $first) {
-      ...TaskListFields
+  query AdminTasks($filter: AdminTaskFilter, $first: Int, $after: String) {
+    adminTasks(filter: $filter, first: $first, after: $after) {
+      nextCursor
+      items {
+        ...TaskListFields
+      }
     }
   }
 `
 
 export const AdminTask = gql`
-  ${TASK_DOSSIER_FIELDS}
+  ${TASK_LIST_FIELDS}
   ${USER_ADMIN_FIELDS}
   ${WORKER_FIELDS}
   ${ADMIN_TASK_DOSSIER}
@@ -333,53 +249,49 @@ export const AdminTask = gql`
   }
 `
 
-export const AdminTaskByFilter = gql`
-  ${TASK_DOSSIER_FIELDS}
-  query AdminTaskByFilter($filter: AdminTaskFilter, $first: Int) {
-    adminTasks(filter: $filter, first: $first) {
-      ...TaskDossierFields
-    }
-  }
-`
-
-export const AdminWorkers = gql`
-  ${WORKER_FIELDS}
-  query AdminWorkers($search: String, $id: ID, $first: Int) {
-    adminWorkers(search: $search, id: $id, first: $first) {
-      ...WorkerAdminFields
-    }
-  }
-`
-
 export const AdminUsers = gql`
   ${USER_ADMIN_FIELDS}
-  query AdminUsers($search: String, $id: ID, $first: Int) {
-    adminUsers(search: $search, id: $id, first: $first) {
-      ...UserAdminFields
+  query AdminUsers(
+    $search: String
+    $id: ID
+    $disabled: Boolean
+    $isWorker: Boolean
+    $createdAfter: DateTime
+    $createdBefore: DateTime
+    $first: Int
+    $after: String
+  ) {
+    adminUsers(
+      search: $search
+      id: $id
+      disabled: $disabled
+      isWorker: $isWorker
+      createdAfter: $createdAfter
+      createdBefore: $createdBefore
+      first: $first
+      after: $after
+    ) {
+      nextCursor
+      items {
+        ...UserAdminFields
+      }
     }
   }
 `
 
 export const AdminUserDetail = gql`
   ${USER_ADMIN_FIELDS}
-  query AdminUserDetail($id: ID, $first: Int) {
-    adminUsers(id: $id, first: $first) {
-      ...UserAdminFields
-      tasksPosted {
-        id
-        title
-        status
-        category
+  query AdminUserDetail($id: ID!) {
+    adminUsers(id: $id, first: 1) {
+      items {
+        ...UserAdminFields
+        tasksPosted {
+          id
+          title
+          status
+          category
+        }
       }
-    }
-  }
-`
-
-export const AdminUserDetailCore = gql`
-  ${USER_ADMIN_FIELDS}
-  query AdminUserDetailCore($id: ID, $first: Int) {
-    adminUsers(id: $id, first: $first) {
-      ...UserAdminFields
     }
   }
 `
@@ -435,21 +347,6 @@ const REPORT_FIELDS = gql`
   }
 `
 
-const REPORT_CORE_FIELDS = gql`
-  fragment ReportCoreFields on Report {
-    id
-    targetId
-    targetType
-    reason
-    details
-    status
-    targetUrl
-    createdAt
-    updatedAt
-    reporterUserId
-  }
-`
-
 export const AdminReports = gql`
   ${REPORT_FIELDS}
   query AdminReports(
@@ -472,63 +369,11 @@ export const AdminReports = gql`
   }
 `
 
-export const AdminReportsCore = gql`
-  ${REPORT_CORE_FIELDS}
-  query AdminReportsCore(
-    $status: ReportStatus
-    $targetType: ReportTargetType
-    $first: Int
-    $after: String
-  ) {
-    adminReports(
-      status: $status
-      targetType: $targetType
-      first: $first
-      after: $after
-    ) {
-      nextCursor
-      items {
-        ...ReportCoreFields
-      }
-    }
-  }
-`
-
-export const Reports = gql`
-  ${REPORT_CORE_FIELDS}
-  query Reports($status: ReportStatus, $first: Int, $after: String) {
-    reports(status: $status, first: $first, after: $after) {
-      nextCursor
-      items {
-        ...ReportCoreFields
-      }
-    }
-  }
-`
-
 export const AdminUpdateReportStatus = gql`
   ${REPORT_FIELDS}
   mutation AdminUpdateReportStatus($id: ID!, $status: ReportStatus!) {
     adminUpdateReportStatus(id: $id, status: $status) {
       ...ReportFields
-    }
-  }
-`
-
-export const AdminUpdateReportStatusCore = gql`
-  ${REPORT_CORE_FIELDS}
-  mutation AdminUpdateReportStatusCore($id: ID!, $status: ReportStatus!) {
-    adminUpdateReportStatus(id: $id, status: $status) {
-      ...ReportCoreFields
-    }
-  }
-`
-
-export const UpdateReportStatus = gql`
-  ${REPORT_CORE_FIELDS}
-  mutation UpdateReportStatus($id: ID!, $status: ReportStatus!) {
-    updateReportStatus(id: $id, status: $status) {
-      ...ReportCoreFields
     }
   }
 `
@@ -547,22 +392,6 @@ const FEEDBACK_FIELDS = gql`
     userAgent
     status
     ackEmailSentAt
-    createdAt
-    updatedAt
-  }
-`
-
-const FEEDBACK_CORE_FIELDS = gql`
-  fragment FeedbackCoreFields on Feedback {
-    id
-    userId
-    email
-    name
-    category
-    rating
-    message
-    pageUrl
-    status
     createdAt
     updatedAt
   }
@@ -601,28 +430,6 @@ export const AdminFeedbacks = gql`
   }
 `
 
-export const AdminFeedbacksCore = gql`
-  ${FEEDBACK_CORE_FIELDS}
-  query AdminFeedbacksCore(
-    $status: FeedbackStatus
-    $category: FeedbackCategory
-    $first: Int
-    $after: String
-  ) {
-    adminFeedbacks(
-      status: $status
-      category: $category
-      first: $first
-      after: $after
-    ) {
-      nextCursor
-      items {
-        ...FeedbackCoreFields
-      }
-    }
-  }
-`
-
 export const AdminUpdateFeedbackStatus = gql`
   ${FEEDBACK_FIELDS}
   mutation AdminUpdateFeedbackStatus($id: ID!, $status: FeedbackStatus!) {
@@ -632,36 +439,8 @@ export const AdminUpdateFeedbackStatus = gql`
   }
 `
 
-export const AdminUpdateFeedbackStatusCore = gql`
-  ${FEEDBACK_CORE_FIELDS}
-  mutation AdminUpdateFeedbackStatusCore($id: ID!, $status: FeedbackStatus!) {
-    adminUpdateFeedbackStatus(id: $id, status: $status) {
-      ...FeedbackCoreFields
-    }
-  }
-`
-
 export const AdminFeedbackDraftReply = gql`
   query AdminFeedbackDraftReply($id: ID!) {
-    adminFeedbackDraftReply(id: $id) {
-      subject
-      bodyText
-      bodyHtml
-    }
-  }
-`
-
-export const AdminFeedbackDraftReplyCore = gql`
-  query AdminFeedbackDraftReplyCore($id: ID!) {
-    adminFeedbackDraftReply(id: $id) {
-      subject
-      bodyText
-    }
-  }
-`
-
-export const AdminFeedbackDraftReplyMutation = gql`
-  mutation AdminFeedbackDraftReplyMutation($id: ID!) {
     adminFeedbackDraftReply(id: $id) {
       subject
       bodyText
@@ -718,11 +497,6 @@ export const AdminOpsSummary = gql`
         previous
         percentChange
       }
-      jobsConfirmed {
-        current
-        previous
-        percentChange
-      }
       reportsSubmitted {
         current
         previous
@@ -735,51 +509,6 @@ export const AdminOpsSummary = gql`
         status
         count
       }
-    }
-  }
-`
-
-export const Tasks = gql`
-  ${TASK_LIST_FIELDS}
-  query Tasks($filter: TaskFilter) {
-    tasks(filter: $filter) {
-      ...TaskListFields
-    }
-  }
-`
-
-export const Task = gql`
-  ${TASK_DOSSIER_FIELDS}
-  query Task($id: ID!) {
-    task(id: $id) {
-      ...TaskDossierFields
-    }
-  }
-`
-
-export const TaskCore = gql`
-  ${TASK_LIST_FIELDS}
-  query TaskCore($id: ID!) {
-    task(id: $id) {
-      ...TaskListFields
-    }
-  }
-`
-
-export const Workers = gql`
-  ${WORKER_FIELDS}
-  query Workers($filter: WorkerFilter) {
-    workers(filter: $filter) {
-      ...WorkerAdminFields
-    }
-  }
-`
-
-export const Worker = gql`
-  ${WORKER_FIELDS}
-  query Worker($id: ID!) {
-    worker(id: $id) {
-      ...WorkerAdminFields
     }
   }
 `

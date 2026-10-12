@@ -1,7 +1,6 @@
 export type UserEditFormValues = {
   name: string
   contactNumber: string
-  bio: string
   emailVerified: boolean
   phoneVerified: boolean
 }
@@ -12,7 +11,6 @@ export type UserEditSource = {
   profile?: {
     name?: string | null
     contactNumber?: string | null
-    bio?: string | null
   } | null
 }
 
@@ -27,7 +25,6 @@ export function userToFormValues(user: UserEditSource): UserEditFormValues {
   return {
     name: user.profile?.name?.trim() ?? '',
     contactNumber: user.profile?.contactNumber?.trim() ?? '',
-    bio: user.profile?.bio?.trim() ?? '',
     emailVerified: Boolean(user.emailVerified),
     phoneVerified: Boolean(user.phoneVerified),
   }

@@ -1,11 +1,11 @@
 import { Suspense } from 'react'
 
-import { SearchHome } from '@/components/SearchHome'
+import { UsersTable } from '@/components/UsersTable'
 
 export default function UsersPage() {
   return (
     <Suspense fallback={<p className="muted">Loading users…</p>}>
-      <SearchHome mode="users" />
+      <UsersTable />
     </Suspense>
   )
 }

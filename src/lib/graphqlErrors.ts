@@ -8,37 +8,3 @@ export function graphqlErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
   return 'Something went wrong'
 }
-
-export function isUnknownFilterFieldError(error: unknown): boolean {
-  const message = graphqlErrorMessage(error).toLowerCase()
-  if (message.includes('cannot query field')) return false
-  return (
-    message.includes('bbox') ||
-    message.includes('geobbox') ||
-    ((message.includes('admintaskfilter') || message.includes('filter')) &&
-      (message.includes('unknown') ||
-        message.includes('not defined') ||
-        message.includes('unknown argument')))
-  )
-}
-
-export function isMissingAdminFieldError(error: unknown): boolean {
-  const message = graphqlErrorMessage(error).toLowerCase()
-  return (
-    message.includes('cannot query field') ||
-    message.includes('unknown field') ||
-    message.includes('unknown argument') ||
-    (message.includes('admin') &&
-      (message.includes('undefined') || message.includes('not found')))
-  )
-}
-
-export function isForbiddenAdminError(error: unknown): boolean {
-  const message = graphqlErrorMessage(error).toLowerCase()
-  return (
-    message.includes('not an admin') ||
-    message.includes('not admin') ||
-    message.includes('forbidden') ||
-    message.includes('unauthorized')
-  )
-}

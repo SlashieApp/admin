@@ -1,306 +1,201 @@
-"""
-Slashie admin GraphQL contract.
+# MongoDB entity directives (for @graphql-codegen/typescript-mongodb)
+directive @entity(
+  embedded: Boolean
+  additionalFields: [AdditionalEntityFields]
+) on OBJECT
+directive @column(overrideType: String) on FIELD_DEFINITION
+directive @id on FIELD_DEFINITION
+directive @link(overrideType: String) on FIELD_DEFINITION
+directive @embedded on FIELD_DEFINITION
+directive @map(path: String!) on FIELD_DEFINITION
+directive @auth on FIELD_DEFINITION
+directive @admin on FIELD_DEFINITION
 
-Marketplace types match live apollo introspection (2026-09-14) plus BE-43
-admin expansions. `@admin` fields:
-
-  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
-  adminTask(id: ID!): AdminTaskDossier!
-  adminWorkers(search: String, id: ID, first: Int): [worker!]!
-  adminUsers(search: String, id: ID, first: Int = 50): [User!]!
-  adminOpsSummary(range: AdminOpsRange!, dateFrom: DateTime, dateTo: DateTime): AdminOpsSummary!
-  adminReports(status: ReportStatus, targetType: ReportTargetType, first: Int = 50, after: String): ReportPage!
-  adminFeedbackSummary: AdminFeedbackSummary!
-  adminFeedbacks(status: FeedbackStatus, category: FeedbackCategory, first: Int = 50, after: String): FeedbackPage!
-  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
-  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
-  adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
-  adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
-  adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
-  adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback!
-
-BE-46 report inbox is `@admin` (Admin collection + `@slashie.app`). It does
-not require env ADMIN_EMAILS. BE-40 env-allowlist
-`reports` / `updateReportStatus` fields stay for existing tools; the panel
-falls back to them when `adminReports` is not deployed yet.
-
-Default inbox: omit `status` (all statuses, API newest-first)
-and pass `targetType: TASK`. The panel then displays OPEN-first so ops see
-actionable reports without hiding history.
-
-Product feedback (BE-48) is a separate domain from trust-and-safety
-reports. Default inbox: omit status and category (newest first); the
-panel then displays OPEN-first. Draft reply is a template for a human
-to send — it is not auto-sent from this panel.
-
-See https://linear.app/slashie/issue/BE-42
-See https://linear.app/slashie/issue/BE-43
-See https://linear.app/slashie/issue/BE-46
-See https://linear.app/slashie/issue/BE-48
-See https://linear.app/slashie/issue/BE-49
-"""
+input AdditionalEntityFields {
+  path: String
+  type: String
+}
 
 scalar DateTime
-scalar JSON
 
-enum LoginMethod {
-  PASSWORD
-  GOOGLE
-  APPLE
-}
+scalar JSON
 
 enum Currency {
   USD
   GBP
 }
 
-enum TaskStatus {
-  DRAFT
-  OPEN
-  AWARDED
-  QUOTE_ACCEPTED
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-  CONFIRMED
-}
-
-enum TaskBudgetType {
-  ONE_OFF
-  PER_DAY
-  PER_HOUR
-}
-
-enum TaskPaymentMethod {
-  CASH
-  BANK_TRANSFER
-}
-
-enum TaskDateTimeType {
-  BEFORE
-  FLEXIBLE
-  EXACT
-}
-
-enum TaskContactMethod {
-  PHONE
-  EMAIL
-  IN_APP
-}
-
-enum WorkerPrimaryCategory {
-  HANDYMAN
-  FURNITURE_ASSEMBLY
-  MOUNTING_INSTALLATION
-  PLUMBING
-  ELECTRICAL
-  CARPENTRY
-  PAINTING
-  CLEANING
-  GARDENING
-  REMOVALS
-  DELIVERY_ERRANDS
-  OTHER
-}
-
-enum IdentityVerificationStatus {
-  NOT_STARTED
-  PENDING
-  VERIFIED
-}
-
-enum QuoteStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-  WITHDRAWN
-  REJECTED
-}
-
-enum OrderStatus {
-  ACTIVE
-  WORK_COMPLETED
-  PAYMENT_ACKNOWLEDGED
-  CLOSED
-  CANCELLED
-}
-
-enum NotificationType {
-  QUOTE_RECEIVED
-  QUOTE_ACCEPTED
-  QUOTE_DECLINED
-  TASK_COMPLETED
-  TASK_CONFIRMED
-  ORDER_WORK_COMPLETED
-  ORDER_CLOSED
-}
-
-enum TaskTimelineEventType {
-  TASK_CREATED
-  TASK_UPDATED
-  TASK_CANCELLED
-  TASK_COMPLETED
-  TASK_CONFIRMED
-  TASK_PAID
-}
-
-type Profile {
-  name: String
-  contactNumber: String
-  avatarUrl: String
-  bio: String
-  emailVerified: Boolean
-  phoneVerified: Boolean
-}
-
-type User {
-  id: ID!
-  email: String!
-  emailVerified: Boolean!
-  phoneVerified: Boolean
-  createdAt: DateTime
-  enabledLoginMethods: [LoginMethod!]
-  profile: Profile
-  worker: worker
-  disabled: Boolean!
-  tasksPosted: [Task!]
-}
-
-type AuthPayload {
-  token: String!
-  user: User!
-}
-
-input LoginInput {
-  method: LoginMethod!
-  email: String
-  password: String
-  oauthToken: String
-  captchaToken: String
-}
-
-type TaskBudget {
-  amount: Float!
-  currency: Currency!
-  type: TaskBudgetType!
-  paymentMethod: TaskPaymentMethod!
-}
-
-input TaskBudgetInput {
-  amount: Float!
-  currency: Currency!
-  type: TaskBudgetType!
-  paymentMethod: TaskPaymentMethod!
-}
-
-type TaskLocation {
-  lat: Float
-  lng: Float
-  name: String
-  address: String
-}
-
-input TaskLocationInput {
-  lat: Float!
-  lng: Float!
-  name: String!
-  address: String!
-}
-
-type Location {
-  address: String
-  lat: Float
-  lng: Float
-  name: String
-}
-
-type TaskDateTime {
-  date: String
-  time: String
-  type: TaskDateTimeType!
-}
-
 type Price {
-  amount: Float!
   currency: Currency!
-}
-
-type OrderAgreedPrice {
   amount: Float!
+}
+
+input PriceInput {
   currency: Currency!
+  amount: Float!
 }
 
-type Quote {
-  id: ID!
-  taskId: ID
-  workerUserId: ID
-  status: QuoteStatus!
-  message: String
-  estimatedDuration: String
-  createdAt: DateTime
-  price: Price
-  """Live marketplace names this field `worker` but the type is User."""
-  worker: User
-  task: Task
+input PaginationInput {
+  page: Int = 1
+  pageSize: Int = 20
 }
 
-type Order {
-  id: ID!
-  taskId: ID
-  quoteId: ID
-  customerUserId: ID
-  workerUserId: ID
-  status: OrderStatus!
-  createdAt: DateTime
-  workCompletedAt: DateTime
-  closedAt: DateTime
-  agreedPrice: OrderAgreedPrice
-  task: Task
+type PaginationInfo {
+  page: Int!
+  pageSize: Int!
+  totalItems: Int!
+  totalPages: Int!
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
 }
 
-type Notification {
-  id: ID!
-  type: NotificationType!
-  title: String!
-  body: String!
-  createdAt: DateTime
-  recipientUserId: ID
-  actorUserId: ID
-  taskId: ID
-  quoteId: ID
-  orderId: ID
-  actor: User
-  recipient: User
+type Query {
+  health: String!
 }
 
-type TaskTimelineEvent {
-  type: TaskTimelineEventType!
-  timestamp: DateTime!
-  actor: User!
-  data: JSON
+type Mutation {
+  _empty: String
 }
 
-type Task {
-  id: ID!
-  title: String!
-  description: String!
-  category: String!
-  status: TaskStatus!
-  views: Int
-  budget: TaskBudget
-  location: TaskLocation!
-  poster: User
-  datetime: TaskDateTime
-  images: [String!]
-  quotes: [Quote!]
-  orders: [Order!]
-  timeline: [TaskTimelineEvent!]
-  """BE-42 god-mode visibility. Absent on pre-admin marketplace selections."""
+type Subscription {
+  _empty: String
+}
+
+"""
+Ops allowlist row. Presence of an active document (plus @slashie.app email)
+is required for fields marked `@admin`. Not a marketplace user role.
+"""
+type Admin
+  @entity(additionalFields: [{ path: "userId", type: "IdDoc['_id'] | null" }])
+{
+  id: ID! @id
+  """
+  Normalized lowercase email. Unique. Must end with `@slashie.app`.
+  """
+  email: String! @column
+  """
+  Linked user id when known (set on first successful `@admin` call).
+  """
+  userId: ID
+  """
+  Inactive rows cannot call `@admin` fields.
+  """
+  active: Boolean! @column
+  createdAt: DateTime! @column(overrideType: "Date")
+}
+
+"""
+Ops search across all tasks (including hidden, cancelled, and non-OPEN).
+"""
+input AdminTaskFilter {
+  """
+  Case-insensitive match on title, description, or place name. A 24-char hex
+  value also matches the task id.
+  """
+  search: String
+  """
+  Exact task id lookup.
+  """
+  id: ID
+  """
+  Constrain by status(es). Omit for all statuses.
+  """
+  status: [TaskStatus!]
+  """
+  When set, only hidden or only visible tasks.
+  """
   hidden: Boolean
+  """
+  Case-insensitive exact category match (same rule as public `TaskFilter.category`).
+  """
+  category: String
+  """
+  Exact poster user id (`Task.createdByUserId`).
+  """
+  posterId: ID
+  """
+  Case-insensitive match on poster email or profile name. A 24-char hex value
+  also matches the poster user id.
+  """
+  posterSearch: String
+  """
+  Inclusive lower bound on `budget.amount`.
+  """
+  budgetMin: Float
+  """
+  Inclusive upper bound on `budget.amount`.
+  """
+  budgetMax: Float
+  """
+  Exact budget type (`ONE_OFF`, `PER_DAY`, `PER_HOUR`).
+  """
+  budgetType: TaskBudgetType
+  """
+  Inclusive lower bound on task `createdAt` (`createdAt >= value`).
+  """
+  createdAfter: DateTime
+  """
+  Inclusive upper bound on task `createdAt` (`createdAt <= value`).
+  """
+  createdBefore: DateTime
+  """
+  Map viewport: tasks whose `location` falls inside the box (inclusive).
+  South-west / north-east corners. Antimeridian-crossing boxes are rejected
+  (`INVALID_BOUNDS`). Combine with `after` / `nextCursor` to page pins in view.
+  """
+  bbox: GeoBoundsInput
 }
 
+"""
+Cursor page for ops task lists (`adminTasks`). Newest first.
+"""
+type TaskPage {
+  items: [Task!]!
+  """
+  Opaque cursor (task id) for the next page, or null when there are no more items.
+  """
+  nextCursor: String
+}
+
+"""
+Cursor page for ops people lists (`adminUsers`). Newest first.
+"""
+type UserPage {
+  items: [User!]!
+  """
+  Opaque cursor (user id) for the next page, or null when there are no more items.
+  """
+  nextCursor: String
+}
+
+"""
+God-mode task amendments. Every field is optional; only provided fields change.
+Ignores poster ownership and OPEN/DRAFT restrictions. Input is still validated.
+"""
+input AdminUpdateTaskInput {
+  title: String
+  description: String
+  category: String
+  budget: TaskBudgetInput
+  location: TaskLocationInput
+  """
+  Date and time preference. Pass null to clear.
+  """
+  datetime: TaskDateTimeInput
+  status: TaskStatus
+  """
+  Hide from public discovery (`Query.tasks`) without cancelling the task.
+  """
+  hidden: Boolean
+  preferredContactMethod: TaskContactMethod
+}
+
+"""
+Unified activity row for a task dossier. Flashes plus task timeline events,
+newest first. Chat messages are not included.
+"""
 enum AdminTaskActivitySource {
-  NOTIFICATION
+  FLASH
   TIMELINE
 }
 
@@ -310,114 +205,54 @@ type AdminTaskActivity {
   title: String
   body: String
   actorUserId: ID
-  recipientUserId: ID
+  """
+  Flashes: who can see it. Empty for timeline rows.
+  """
+  visibleToUserIds: [ID!]!
   quoteId: ID
   orderId: ID
   createdAt: DateTime!
 }
 
+"""
+Everything related to one task for ops. Prefer this over stitching public queries.
+Task is owner-shaped so location/address/hidden are visible. Quote amounts are
+included (marketplace `Quote.price` is visible to the poster and the quoting worker).
+"""
 type AdminTaskDossier {
   task: Task!
   poster: User
+  """
+  Union of workers linked via quotes or orders on this task. Users without a
+  worker profile are omitted here (they still appear on quotes/orders).
+  """
   workers: [worker!]!
   quotes: [Quote!]!
   orders: [Order!]!
   activity: [AdminTaskActivity!]!
 }
 
-type WorkerRatingSummary {
-  average: Float
-  count: Int!
-}
-
-type ServiceArea {
-  radiusMiles: Float
-  label: String
-}
-
-"""Live apollo names this object `worker` (lowercase)."""
-type worker {
-  id: ID!
-  userId: ID
-  legalName: String
-  bio: String
-  tagline: String
-  primaryCategory: WorkerPrimaryCategory
-  yearsExperience: Int
-  isVerified: Boolean!
-  identityVerification: IdentityVerificationStatus
-  skills: [String!]
-  qualifications: [String!]
-  tasksCompletedCount: Int
-  quotesSentCount: Int
-  phoneVerified: Boolean
-  emailVerified: Boolean
-  memberSince: DateTime
-  serviceAreaLabel: String
-  averageResponseTime: String
-  profile: Profile
-  user: User
-  preferredLocation: Location
-  serviceArea: ServiceArea
-  ratingSummary: WorkerRatingSummary
-}
-
-input TaskFilter {
-  search: String
-  category: String
-  status: [TaskStatus!]
-}
-
-input WorkerFilter {
-  search: String
-}
-
-"""Visible map viewport for ops area browse (BE-49)."""
-input GeoBBox {
-  swLat: Float!
-  swLng: Float!
-  neLat: Float!
-  neLng: Float!
-}
-
-input AdminTaskFilter {
-  search: String
-  id: ID
-  status: [TaskStatus!]
-  hidden: Boolean
-  """
-  Tasks whose location falls inside this viewport. Scaffolded for FE-171;
-  live Apollo rejects the field until BE-49 ships bbox.
-  """
-  bbox: GeoBBox
-  """BE-49 proposed; not sent until the live schema accepts it."""
-  category: String
-  posterSearch: String
-  posterId: ID
-  budgetMin: Float
-  budgetMax: Float
-  budgetType: TaskBudgetType
-  createdAfter: DateTime
-  createdBefore: DateTime
-}
-
-input AdminUpdateTaskInput {
-  title: String
-  description: String
-  status: TaskStatus
-  category: String
-  location: TaskLocationInput
-  budget: TaskBudgetInput
-  hidden: Boolean
-}
-
+"""
+God-mode user amendments. Every field is optional; only provided fields change.
+Does not expose or accept password hashes or reset tokens.
+"""
 input AdminUpdateUserInput {
+  """
+  Display name (`User.profile.name`).
+  """
   name: String
   contactNumber: String
   emailVerified: Boolean
   phoneVerified: Boolean
 }
 
+"""
+Preset windows for `adminOpsSummary`. All windows are UTC and half-open
+`[from, to)`. Rolling ranges are `[now - N days, now)`. `THIS_MONTH` is
+`[UTC month start, now)` compared with the same elapsed slice of the previous
+month. `LAST_MONTH` is the previous UTC calendar month vs the month before.
+Pass `dateFrom` and `dateTo` together to override with a custom window.
+"""
 enum AdminOpsRange {
   LAST_7_DAYS
   LAST_30_DAYS
@@ -425,87 +260,335 @@ enum AdminOpsRange {
   LAST_MONTH
 }
 
+"""
+A ranged Mongo count plus the immediately preceding window of the same length.
+`percentChange` is `((current - previous) / previous) * 100`. Null when previous
+is 0 and current is not (undefined % from zero). 0 when both are 0.
+"""
 type AdminOpsMetric {
   current: Int!
   previous: Int!
   percentChange: Float
 }
 
+"""
+Point-in-time task count for one `TaskStatus`. `adminOpsSummary.tasksByStatus`
+always includes every status, including zeros.
+"""
 type AdminTaskStatusCount {
   status: TaskStatus!
   count: Int!
 }
 
-"""BE-44 Mongo-authoritative ops KPIs for the admin dashboard."""
+"""
+Mongo-authoritative ops KPIs for the admin dashboard. Ranged fields use the
+resolved `[dateFrom, dateTo)` window; snapshot fields are current as of now.
+"""
 type AdminOpsSummary {
   range: AdminOpsRange!
   dateFrom: DateTime!
   dateTo: DateTime!
   previousDateFrom: DateTime!
   previousDateTo: DateTime!
+  """
+  Users with `createdAt` in the window.
+  """
   newUsers: AdminOpsMetric!
+  """
+  Tasks with `createdAt` in the window (all statuses, including hidden/drafts).
+  """
   tasksCreated: AdminOpsMetric!
+  """
+  Workers whose setup was submitted in the window (`setupCompletedAt`, the same
+  flag as public `Query.workers` visibility). Incomplete setup drafts are excluded.
+  """
   workersRegistered: AdminOpsMetric!
+  """
+  Quotes with `createdAt` in the window (any later status, including withdrawn).
+  """
   quotesSent: AdminOpsMetric!
+  """
+  Quotes currently `ACCEPTED` whose `createdAt` falls in the window. Quotes have
+  no status-changed timestamp, so this is dated by send time, not accept time.
+  """
   quotesAccepted: AdminOpsMetric!
+  """
+  Quotes currently `DECLINED` or `REJECTED` whose `createdAt` falls in the
+  window. Withdrawn quotes are not declined.
+  """
   quotesDeclined: AdminOpsMetric!
+  """
+  Orders with `createdAt` in the window (one per accepted quote).
+  """
   ordersOpened: AdminOpsMetric!
+  """
+  Orders that reached COMPLETED (mutual Done or 7-day auto-Done) in the window, by `closedAt`.
+  """
   jobsCompleted: AdminOpsMetric!
-  jobsConfirmed: AdminOpsMetric!
+  """
+  Trust reports with `createdAt` in the window (any status).
+  """
   reportsSubmitted: AdminOpsMetric!
+  """
+  Point-in-time: reports currently `OPEN`.
+  """
   openReports: Int!
+  """
+  Point-in-time: tasks with `hidden: true`.
+  """
   hiddenTasks: Int!
+  """
+  Point-in-time: users with `disabled: true`. Missing field is treated as not
+  disabled.
+  """
   disabledUsers: Int!
+  """
+  Point-in-time: every `TaskStatus` and its current document count.
+  """
   tasksByStatus: [AdminTaskStatusCount!]!
 }
 
-enum ReportReason {
-  SPAM
-  HARASSMENT
-  ILLEGAL_OR_PROHIBITED
-  SCAM
-  OTHER
-}
-
-enum ReportStatus {
-  OPEN
-  REVIEWED
-  ACTIONED
-  DISMISSED
-}
-
-enum ReportTargetType {
-  TASK
-  WORKER
-  USER
+"""
+Point-in-time counts for the product-feedback inbox. Distinct from
+`adminOpsSummary.openReports` / trust reports.
+"""
+type AdminFeedbackSummary {
+  total: Int!
+  open: Int!
+  reviewed: Int!
+  replied: Int!
+  dismissed: Int!
 }
 
 """
-Trust-and-safety report. BE-46 enriches `reporter`, `reporterEmail`, and
-`targetLabel` for ops (task title when targetType is TASK).
-BE-40 payloads always include reporterUserId + target fields.
+Templated ops reply for a feedback row. Not sent automatically — copy and
+personalise before sending.
 """
-type Report {
-  id: ID!
-  targetId: ID!
-  targetType: ReportTargetType!
-  reason: ReportReason!
-  details: String
-  status: ReportStatus!
-  targetUrl: String
-  """Linked task title (or worker/user label) when BE-46 enrichment is present."""
-  targetLabel: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  reporterUserId: ID!
-  reporterEmail: String
-  reporter: User
+type AdminFeedbackDraftReply {
+  subject: String!
+  bodyText: String!
+  bodyHtml: String
 }
 
-type ReportPage {
-  items: [Report!]!
-  """Opaque cursor (report id) for the next page, or null when done."""
-  nextCursor: String
+extend type Query {
+  """
+  Ops task search. Requires `@admin` (auth + @slashie.app + active Admin row).
+  Newest first. Empty or omitted `filter.search` returns the newest tasks.
+  `first` defaults to 50 (clamped 1–100). `after` is the previous page's last
+  task id. Returns owner-shaped Task parents so location/address are visible.
+  `filter.bbox` pages tasks in the visible map area.
+  """
+  adminTasks(filter: AdminTaskFilter, first: Int = 50, after: String): TaskPage!
+    @admin
+  """
+  Full ops dossier for one task: owner-shaped task, poster, linked workers,
+  quotes, orders, and activity (flashes + timeline). Throws TASK_NOT_FOUND.
+  """
+  adminTask(id: ID!): AdminTaskDossier! @admin
+  """
+  Primary ops people search (customers and workers). Matches email, profile
+  name, user id, or linked worker legal name/tagline/bio/id. Nested `worker`
+  is present when a profile exists so the UI can show "is worker" without a
+  second query. Empty or omitted search returns the newest users. `first`
+  defaults to 50 (clamped 1–100). `after` is the previous page's last user id.
+  `disabled` / `isWorker` / date bounds are optional composed filters.
+  """
+  adminUsers(
+    search: String
+    id: ID
+    disabled: Boolean
+    isWorker: Boolean
+    createdAfter: DateTime
+    createdBefore: DateTime
+    first: Int = 50
+    after: String
+  ): UserPage! @admin
+  """
+  Mongo-authoritative ops summary for the admin dashboard. Requires `@admin`.
+  Provide `range`, or both `dateFrom` and `dateTo` (half-open, UTC). When both
+  custom dates are set they override the preset window; `range` is still
+  returned on the payload for the client toggle.
+  """
+  adminOpsSummary(
+    range: AdminOpsRange!
+    dateFrom: DateTime
+    dateTo: DateTime
+  ): AdminOpsSummary! @admin
+  """
+  Ops trust-report inbox. Newest first. Omit `status` to include every
+  status (OPEN, REVIEWED, ACTIONED, DISMISSED). Filter `targetType: TASK`
+  for reported tasks. `first` defaults to 50 (clamped 1–100). `after` is
+  the previous page's last report id. Does not require ADMIN_EMAILS.
+  `reporter` matches reporter email, profile name, or user id.
+  """
+  adminReports(
+    status: ReportStatus
+    targetType: ReportTargetType
+    reason: ReportReason
+    reporter: String
+    createdAfter: DateTime
+    createdBefore: DateTime
+    first: Int = 50
+    after: String
+  ): ReportPage! @admin
+  """
+  Point-in-time product-feedback counts. Distinct from trust reports.
+  """
+  adminFeedbackSummary: AdminFeedbackSummary! @admin
+  """
+  Ops product-feedback inbox. Newest first. Omit `status` / `category` to
+  include every value. `first` defaults to 50 (clamped 1–100). `after` is
+  the previous page's last feedback id. `search` matches message, name, or
+  email. `email` is a case-insensitive contains match on the stored address.
+  """
+  adminFeedbacks(
+    status: FeedbackStatus
+    category: FeedbackCategory
+    email: String
+    rating: Int
+    search: String
+    createdAfter: DateTime
+    createdBefore: DateTime
+    first: Int = 50
+    after: String
+  ): FeedbackPage! @admin
+  """
+  Templated draft reply quoting this feedback. Does not send email.
+  """
+  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply! @admin
+}
+
+extend type Mutation {
+  """
+  God-mode task update for ops. Does not require poster ownership.
+  """
+  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task! @admin
+  """
+  God-mode user update for ops. Safe fields only (name, contact, verification).
+  """
+  adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User! @admin
+  """
+  Disable or re-enable a marketplace account. Login still succeeds and
+  returns `user.disabled: true`. `@auth` actions (except `Query.me`) throw
+  `ACCOUNT_DISABLED`. Password-reset tokens are cleared on disable.
+  """
+  adminSetUserDisabled(id: ID!, disabled: Boolean!): User! @admin
+  """
+  Set report status for the ops inbox. Same `reports` collection as BE-40
+  `updateReportStatus` (env allowlist). Does not require ADMIN_EMAILS.
+  """
+  adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report! @admin
+  """
+  Set product-feedback status. Does not send the draft reply.
+  """
+  adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback! @admin
+}
+
+enum WorkerSubscriptionStatus {
+  """
+  No live subscription — free tier quote limits apply.
+  """
+  NONE
+  """
+  Stripe `trialing` — unlimited quotes during trial.
+  """
+  TRIALING
+  """
+  Stripe `active` — paying subscriber with unlimited quotes.
+  """
+  ACTIVE
+  """
+  Stripe `past_due` — payment failed; quotes blocked until resolved.
+  """
+  PAST_DUE
+  """
+  Stripe `canceled` — subscription ended; free tier applies.
+  """
+  CANCELED
+  """
+  Stripe `unpaid` — invoice unpaid; quotes blocked.
+  """
+  UNPAID
+  """
+  Stripe `incomplete` — Checkout started but not completed.
+  """
+  INCOMPLETE
+  """
+  Stripe `incomplete_expired` — Checkout session expired.
+  """
+  INCOMPLETE_EXPIRED
+  """
+  Stripe `paused` — subscription paused (if enabled on account).
+  """
+  PAUSED
+}
+
+type WorkerMembership {
+  planName: String!
+  freeQuotesPerMonth: Int!
+  """
+  Distinct tasks this worker quoted in the current UTC month.
+  Withdrawn and soft-deleted quotes still count. Edits on the same task do not add another.
+  """
+  quotesUsedThisMonth: Int!
+  quotesRemainingThisMonth: Int!
+  hasUnlimitedQuotes: Boolean!
+  subscriptionStatus: WorkerSubscriptionStatus!
+  """
+  Short badge label (Free, Trial, Active, Past due, etc.). Prefer this over re-deriving on the client.
+  """
+  statusLabel: String!
+  """
+  One-line helper for subtitles (e.g. trial end date, payment reminder).
+  """
+  statusDescription: String
+  trialEndsAt: DateTime
+  currentPeriodEnd: DateTime
+  """
+  True when Stripe `cancel_at_period_end` is set on the live subscription.
+  """
+  cancelAtPeriodEnd: Boolean!
+  """
+  When Stripe recorded the subscription cancellation, if available.
+  """
+  canceledAt: DateTime
+  canStartTrial: Boolean!
+  """
+  True when the worker has a Stripe customer id and can open the billing portal.
+  """
+  canManageBilling: Boolean!
+  """
+  True when the worker can start Checkout for Slashie Unlimited (no unlimited access, billing configured).
+  """
+  canUpgrade: Boolean!
+}
+
+type CheckoutSessionPayload {
+  url: String!
+}
+
+type PortalSessionPayload {
+  url: String!
+}
+
+extend type Mutation {
+  """
+  Start Stripe Checkout for Slashie Unlimited. Requires an existing Worker profile.
+  """
+  createWorkerSubscriptionCheckout(
+    successUrl: String!
+    cancelUrl: String!
+  ): CheckoutSessionPayload! @auth
+
+  """
+  Open Stripe Customer Portal for the worker's subscription. Requires stripeCustomerId.
+  """
+  createWorkerBillingPortal(returnUrl: String!): PortalSessionPayload! @auth
+
+  """
+  Force Stripe subscription reconcile and return fresh membership (e.g. after Checkout return).
+  """
+  syncWorkerBilling: WorkerMembership! @auth
 }
 
 enum FeedbackCategory {
@@ -523,122 +606,2896 @@ enum FeedbackStatus {
 }
 
 """
-Product feedback submission (BE-48). Distinct from Report / createReport.
-Guests are allowed — userId is null when the submitter was signed out.
+Product feedback from a guest or signed-in user (bugs, ratings, feature
+requests, general comments). Distinct from trust-and-safety `Report`.
+Submitters see the create payload. Ops list via `@admin` `adminFeedbacks`.
+There is no public list.
 """
-type Feedback {
-  id: ID!
+type Feedback
+  @entity(additionalFields: [{ path: "userId", type: "IdDoc['_id'] | null" }])
+{
+  id: ID! @id
+  """
+  Authenticated submitter when the request had a JWT. Null for guests.
+  """
   userId: ID
-  email: String!
-  name: String
-  category: FeedbackCategory!
-  rating: Int
-  message: String!
-  pageUrl: String
-  path: String
-  userAgent: String
-  status: FeedbackStatus!
-  ackEmailSentAt: DateTime
-  createdAt: DateTime!
-  updatedAt: DateTime!
+  """
+  Live User when `userId` still exists. Admin-shaped for ops. Null for guests
+  or if the account was deleted.
+  """
+  user: User
+  """
+  Address used for the auto-ack email. From the form, or the signed-in user.
+  """
+  email: String! @column
+  name: String @column
+  category: FeedbackCategory! @column
+  """
+  Optional 1–5 score. Required when `category` is RATING.
+  """
+  rating: Int @column
+  message: String! @column
+  """
+  Full page URL they submitted from, when the client sends it.
+  """
+  pageUrl: String @column
+  """
+  Path-only fallback (for example `/dashboard`) when a full URL is unavailable.
+  """
+  path: String @column
+  userAgent: String @column
+  status: FeedbackStatus! @column
+  """
+  When the auto-ack email was sent. Null if persist succeeded but email failed.
+  """
+  ackEmailSentAt: DateTime @column(overrideType: "Date")
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime! @column(overrideType: "Date")
 }
 
 type FeedbackPage {
   items: [Feedback!]!
-  """Opaque cursor (feedback id) for the next page, or null when done."""
+  """
+  Opaque cursor (`feedback` id) for the next page, or null when there are no more items.
+  """
   nextCursor: String
 }
 
-type AdminFeedbackSummary {
-  total: Int!
-  open: Int!
-  reviewed: Int!
-  replied: Int!
+input CreateFeedbackInput {
+  """
+  Required for guests. Optional when signed in (defaults to the account email).
+  """
+  email: String
+  name: String
+  category: FeedbackCategory!
+  """
+  1–5. Required when `category` is RATING; optional otherwise.
+  """
+  rating: Int
+  """
+  Required free-text. Trimmed and capped at 2000 characters.
+  """
+  message: String!
+  pageUrl: String
+  path: String
+  userAgent: String
 }
 
-"""Templated ops reply. Not sent automatically — human copies or mailto."""
-type AdminFeedbackDraftReply {
-  subject: String!
-  bodyText: String!
-  bodyHtml: String
+extend type Mutation {
+  """
+  Submit product feedback. Auth optional. Rate-limited per IP and email.
+  Persists first, then sends an auto-ack (fail-open if email fails).
+  """
+  createFeedback(input: CreateFeedbackInput!): Feedback!
 }
 
-type Query {
-  me: User!
-  task(id: ID!): Task
-  tasks(filter: TaskFilter): [Task!]!
-  worker(id: ID!): worker
-  workers(filter: WorkerFilter): [worker!]!
+"""
+`TASK`: one thread per task, shared by the task owner and every worker who
+quoted. `SYSTEM`: one Slashie thread per user (admin announcements).
+"""
+enum ThreadKind {
+  TASK
+  SYSTEM
+}
+
+enum ThreadItemType {
+  """
+  Chat text between the task owner and the accepted worker.
+  """
+  MESSAGE
+  """
+  Event card (quote, booking, reschedule, completion, review prompt, announcement).
+  Push text is exactly the flash `title` and `body`.
+  """
+  FLASH
+}
+
+enum FlashKind {
+  QUOTE_RECEIVED
+  QUOTE_ACCEPTED
+  QUOTE_DECLINED
+  """
+  The owner accepted another worker's quote. Only the non-selected worker sees it.
+  """
+  QUOTE_NOT_SELECTED
+  RESCHEDULE_REQUESTED
+  RESCHEDULE_CONFIRMED
+  RESCHEDULE_DECLINED
+  CANCELLATION_REQUESTED
+  CANCELLATION_DECLINED
+  ORDER_MARKED_DONE
+  ORDER_MARKED_FAILED
+  ORDER_CONFLICT
+  ORDER_COMPLETED
+  ORDER_CANCELLED
+  """
+  Ask the viewer to review the other party. Carries `orderId`.
+  """
+  REVIEW_PROMPT
+  """
+  Ops announcement in the `SYSTEM` thread.
+  """
+  SYSTEM_ANNOUNCEMENT
+}
+
+"""
+Segments an admin may target. Unioned with explicit `userIds`. There is no
+all-users value: omitting both targets is rejected.
+"""
+enum AdminCohortKey {
+  founding_workers
+  geo_watford_bushey
+}
+
+"""
+Push provider for a registered device token.
+Expo tokens are preferred for Slashie mobile; APNs/FCM reserved for later.
+"""
+enum PushPlatform {
+  EXPO
+  APNS
+  FCM
+}
+
+"""
+A person shown in Messages. A user whose account is gone shows as
+`name: "user is already deleted"` with `deleted: true` and no avatar.
+"""
+type ThreadParty {
+  userId: ID!
+  name: String!
+  avatarUrl: String
+  deleted: Boolean!
+}
+
+"""
+A conversation. Only participants can read it; each sees only the items whose
+`visibleTo` includes them.
+"""
+type Thread
+  @entity(
+    additionalFields: [
+      { path: "taskId", type: "IdDoc['_id'] | null" }
+      # SYSTEM threads: the user the thread belongs to.
+      { path: "systemUserId", type: "IdDoc['_id'] | null" }
+      {
+        path: "participants"
+        type: "Array<{ userId: IdDoc['_id'], lastReadAt: Date | null }>"
+      }
+      # Bumped on every new item; orders the inbox.
+      { path: "updatedAt", type: "Date" }
+    ]
+  )
+{
+  id: ID! @id
+  kind: ThreadKind! @column
+  """
+  The task for `TASK` threads. Null for `SYSTEM`.
+  """
+  task: Task
+  """
+  Task title, or "Slashie" for the system thread.
+  """
+  title: String!
+  """
+  The other person: the owner sees the accepted worker (null before a quote is
+  accepted), a worker sees the owner. Null for `SYSTEM`.
+  """
+  otherParty: ThreadParty
+  """
+  Latest item visible to the viewer.
+  """
+  lastItem: ThreadItem
+  """
+  Items visible to the viewer, not made by the viewer, newer than their last read.
+  """
+  unreadCount: Int!
+  """
+  True when the viewer may `sendMessage` here: they are the owner or the
+  accepted worker, a quote was accepted (or an order exists), and neither has
+  blocked the other. Once unlocked it stays unlocked, also after completion or
+  cancellation.
+  """
+  canSend: Boolean!
+  """
+  The viewer blocked `otherParty`.
+  """
+  blockedByMe: Boolean!
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime!
+}
+
+type ThreadItem
+  @entity(
+    additionalFields: [
+      { path: "threadId", type: "IdDoc['_id']" }
+      { path: "taskId", type: "IdDoc['_id'] | null" }
+      { path: "quoteId", type: "IdDoc['_id'] | null" }
+      { path: "orderId", type: "IdDoc['_id'] | null" }
+      # Message author, or the user whose action raised the flash. Null for system flashes.
+      { path: "actorUserId", type: "IdDoc['_id'] | null" }
+      { path: "visibleTo", type: "IdDoc['_id'][]" }
+    ]
+  )
+{
+  id: ID! @id
+  threadId: ID!
+  type: ThreadItemType! @column
+  """
+  Set on flashes only.
+  """
+  flashKind: FlashKind @column
+  """
+  Flash title. Null on messages.
+  """
+  title: String @column
+  """
+  Message text, or the flash body.
+  """
+  body: String! @column
+  imageUrl: String @column
+  """
+  Message author or flash actor. Null for system flashes.
+  """
+  author: ThreadParty
+  """
+  The viewer wrote the message or raised the flash.
+  """
+  isMine: Boolean!
+  taskId: ID
+  quoteId: ID
+  orderId: ID
+  createdAt: DateTime! @column(overrideType: "Date")
+}
+
+"""
+Per-device push registration. Multi-device per user is allowed.
+"""
+type DevicePushToken
+  @entity(
+    additionalFields: [
+      { path: "userId", type: "IdDoc['_id']" }
+      { path: "inactiveAt", type: "Date | null" }
+    ]
+  )
+{
+  id: ID! @id
+  token: String! @column
+  platform: PushPlatform! @column
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime! @column(overrideType: "Date")
+}
+
+"""
+Browser Push API subscription. `p256dh` and `auth` are stored but not readable.
+"""
+type WebPushSubscription
+  @entity(
+    additionalFields: [
+      { path: "userId", type: "IdDoc['_id']" }
+      { path: "p256dh", type: "string" }
+      { path: "auth", type: "string" }
+      { path: "inactiveAt", type: "Date | null" }
+    ]
+  )
+{
+  id: ID! @id
+  endpoint: String! @column
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime! @column(overrideType: "Date")
+}
+
+input RegisterWebPushSubscriptionInput {
+  """
+  `PushSubscription.endpoint`. Must be https.
+  """
+  endpoint: String!
+  """
+  `PushSubscription.keys.p256dh` (URL-safe or standard base64).
+  """
+  p256dh: String!
+  """
+  `PushSubscription.keys.auth` (URL-safe or standard base64).
+  """
+  auth: String!
+}
+
+"""
+Audit row for an ops announcement sent to `SYSTEM` threads.
+"""
+type AdminSystemFlashAudit
+  @entity(
+    additionalFields: [
+      { path: "actorUserId", type: "IdDoc['_id']" }
+      { path: "userIds", type: "IdDoc['_id'][]" }
+      { path: "recipientUserIds", type: "IdDoc['_id'][]" }
+      { path: "itemIds", type: "IdDoc['_id'][]" }
+    ]
+  )
+{
+  id: ID! @id
+  actorUserId: ID!
+  actorEmail: String! @column
+  title: String! @column
+  body: String! @column
+  imageUrl: String @column
+  """
+  Explicit user ids requested (before cohort union).
+  """
+  userIds: [ID!]!
+  cohortKeys: [String!]! @column
+  """
+  Resolved recipients after union and de-duplication.
+  """
+  recipientUserIds: [ID!]!
+  recipientCount: Int!
+  """
+  The flashes written. Empty for dry runs.
+  """
+  itemIds: [ID!]!
+  dryRun: Boolean! @column
+  createdAt: DateTime! @column(overrideType: "Date")
+}
+
+input AdminSendSystemFlashInput {
+  title: String!
+  body: String!
+  """
+  Optional https image shown on the flash card.
+  """
+  imageUrl: String
+  """
+  Explicit recipients. Unioned with `cohortKeys`. Both empty is rejected.
+  """
+  userIds: [ID!]
+  cohortKeys: [AdminCohortKey!]
+  """
+  When true, resolve the recipient count and write an audit row, but do not
+  write flashes.
+  """
+  dryRun: Boolean!
+}
+
+type AdminSendSystemFlashPayload {
+  dryRun: Boolean!
+  recipientCount: Int!
+  audit: AdminSystemFlashAudit!
+}
+
+extend type Query {
+  """
+  One thread the viewer participates in. Null when it does not exist or the
+  viewer is not a participant.
+  """
+  thread(id: ID!): Thread @auth
+  """
+  Items in a thread that are visible to the viewer, newest first. Pass the
+  oldest returned item's `id` as `before` for older items. `first` defaults to
+  50 (max 100). Not a participant: `FORBIDDEN`.
+  """
+  threadItems(threadId: ID!, first: Int = 50, before: ID): [ThreadItem!]! @auth
+  """
+  URL-safe base64 VAPID public key for `PushManager.subscribe`.
+  Null when the server has no VAPID keys configured.
+  The key is public; registering a subscription still requires auth.
+  """
+  webPushVapidPublicKey: String
+}
+
+extend type Mutation {
+  """
+  Send a chat message in a task thread. Only the owner and the accepted worker
+  can send, once a quote is accepted (or an order exists); it never locks again.
+  Errors: `MESSAGE_EMPTY`, `MESSAGE_TOO_LONG` (2000 characters), `FORBIDDEN`
+  (not the owner or accepted worker, or a system thread), `MESSAGE_LOCKED` (no
+  accepted quote yet), `MESSAGE_BLOCKED` (either side blocked the other),
+  `MESSAGE_RATE_LIMITED`.
+  """
+  sendMessage(threadId: ID!, body: String!): ThreadItem! @auth
+  """
+  Mark everything in the thread read for the viewer.
+  """
+  markThreadRead(threadId: ID!): Thread! @auth
+  """
+  Block a user: neither side can send messages to the other until unblocked.
+  Errors: `CANNOT_BLOCK_SELF`.
+  """
+  blockUser(userId: ID!): Boolean! @auth
+  unblockUser(userId: ID!): Boolean! @auth
+  """
+  Ops announcement as a flash in each recipient's `SYSTEM` thread, with push.
+
+  Targets are the union of `userIds` and `cohortKeys`. Omitting both is rejected
+  (no push-to-all). `dryRun: true` returns the recipient count and an audit row
+  without writing flashes. Live sends are rate-limited.
+
+  Errors: `FLASH_TARGET_REQUIRED`, `FLASH_USER_IDS_CAP`, `FLASH_RECIPIENT_CAP`,
+  `USER_NOT_FOUND`, `FLASH_TITLE_REQUIRED`, `FLASH_BODY_REQUIRED`,
+  `INVALID_FLASH_URL`, `ADMIN_FLASH_RATE_LIMITED`, `UNKNOWN_COHORT_KEY`, `NOT_ADMIN`.
+  """
+  adminSendSystemFlash(
+    input: AdminSendSystemFlashInput!
+  ): AdminSendSystemFlashPayload! @admin
+  """
+  Register or refresh a device push token for the authenticated user.
+  Upserts by token so the same device can move between accounts.
+  """
+  registerDevicePushToken(
+    token: String!
+    platform: PushPlatform = EXPO
+  ): DevicePushToken! @auth
+  """
+  Unregister a device push token owned by the authenticated user.
+  Returns true when a matching active token was removed/deactivated.
+  """
+  unregisterDevicePushToken(token: String!): Boolean! @auth
+  """
+  Register or refresh a browser Web Push subscription for the authenticated user.
+  Upserts by `endpoint` so the same browser can move between accounts.
+  Keys are stored server-side and are not returned.
+
+  Errors: `INVALID_WEB_PUSH_SUBSCRIPTION`.
+  """
+  registerWebPushSubscription(
+    input: RegisterWebPushSubscriptionInput!
+  ): WebPushSubscription! @auth
+  """
+  Unregister a Web Push subscription owned by the authenticated user.
+  Returns true when a matching active subscription was deactivated.
+  """
+  unregisterWebPushSubscription(endpoint: String!): Boolean! @auth
+}
+
+extend type Subscription {
+  """
+  A new item visible to the viewer, in any of their threads (messages and
+  flashes). Requires a JWT on the WebSocket connection
+  (`connectionParams.Authorization`).
+  """
+  threadItemAdded: ThreadItem! @auth
+}
+
+"""
+Order lifecycle (BE-66 / BE-67). Before the booked start either party may request a
+reschedule or a cancellation, which the other party confirms or declines. On or after
+the booked start only Done / Failed apply: both Done → COMPLETED, Done vs Failed →
+CONFLICT, both Failed → CANCELLED. CONFLICT exits only through an accepted cancellation.
+"""
+enum OrderStatus {
+  ACTIVE
+  """
+  A reschedule request is waiting for the other party.
+  """
+  RESCHEDULING
+  """
+  A cancellation request (made before the booked start) is waiting for the other party.
+  It lapses back to ACTIVE when the booked start passes.
+  """
+  CANCEL_REQUESTED
+  """
+  One party marked Done and the other Failed.
+  """
+  CONFLICT
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderPartyRole {
+  CUSTOMER
+  WORKER
+}
+
+enum OrderRequestKind {
+  RESCHEDULE
+  CANCEL
+}
+
+enum OrderCloseKind {
+  DONE
+  FAILED
+}
+
+"""
+Private to the party who chose it.
+"""
+enum OrderFailedReason {
+  NO_SHOW
+  WORK_NOT_DONE
+  PAYMENT_NOT_SETTLED
+  OTHER
+}
+
+"""
+An exact booking window. `end` is null when only a start was given.
+"""
+type TimeSlot {
+  id: ID!
+  start: DateTime!
+  end: DateTime
+}
+
+"""
+Exact start plus an optional `end` or `durationMinutes` (15 to 1440), not both.
+Must start in the future and within a year. Times are instants (stored UTC);
+Europe/London is the display zone.
+"""
+input TimeSlotInput {
+  start: DateTime!
+  end: DateTime
+  durationMinutes: Int
+}
+
+type OrderAgreedPrice {
+  amount: Float!
+  currency: Currency!
+}
+
+type OrderLocationSnapshot {
+  lat: Float
+  lng: Float
+  name: String
+  address: String
+}
+
+type OrderSnapshot {
+  title: String!
+  description: String!
+  category: String!
+  location: OrderLocationSnapshot!
+  datetime: TaskDateTime
+  contactMethod: String
+  quoteMessage: String
+  budgetAmount: Float
+  paymentMethod: TaskPaymentMethod
+}
+
+type OrderPendingRequest {
+  kind: OrderRequestKind!
+  requestedByUserId: ID!
+  requestedAt: DateTime!
+  """
+  Reschedule requests only: the 1-2 proposed slots. Empty for cancellations.
+  """
+  proposedSlots: [TimeSlot!]!
+}
+
+"""
+A confirmed reschedule: the booked window before and after.
+"""
+type OrderReschedule {
+  previousStart: DateTime!
+  previousEnd: DateTime
+  start: DateTime!
+  end: DateTime
+  requestedByUserId: ID!
+  confirmedAt: DateTime!
+}
+
+type OrderCloseAction {
+  kind: OrderCloseKind!
+  at: DateTime!
+  """
+  Only set on the viewer's own action.
+  """
+  failedReason: OrderFailedReason
+}
+
+type Order
+  @entity(
+    additionalFields: [
+      { path: "taskId", type: "IdDoc['_id']" }
+      { path: "quoteId", type: "IdDoc['_id']" }
+      { path: "customerUserId", type: "IdDoc['_id']" }
+      { path: "workerUserId", type: "IdDoc['_id']" }
+      { path: "agreedPrice", type: "{ amountPence: number, currency: string }" }
+      { path: "snapshot", type: "Record<string, unknown>" }
+      { path: "bookedStart", type: "Date" }
+      { path: "bookedEnd", type: "Date | null" }
+      {
+        path: "pendingRequest"
+        type: "{ kind: 'RESCHEDULE' | 'CANCEL', requestedBy: 'CUSTOMER' | 'WORKER', requestedAt: Date, proposedSlots: Array<{ id: IdDoc['_id'], start: Date, end: Date | null }> } | null"
+      }
+      {
+        path: "rescheduleHistory"
+        type: "Array<{ previousStart: Date, previousEnd: Date | null, start: Date, end: Date | null, requestedBy: 'CUSTOMER' | 'WORKER', confirmedAt: Date }>"
+      }
+      {
+        path: "closeActions"
+        type: "{ CUSTOMER: { kind: 'DONE' | 'FAILED', at: Date, failedReason: string | null } | null, WORKER: { kind: 'DONE' | 'FAILED', at: Date, failedReason: string | null } | null }"
+      }
+      { path: "autoDoneAt", type: "Date | null" }
+      { path: "closedAt", type: "Date | null" }
+      { path: "rev", type: "number" }
+    ]
+  )
+{
+  id: ID! @id
+  taskId: ID!
+  quoteId: ID!
+  customerUserId: ID!
+  workerUserId: ID!
+  status: OrderStatus! @column
+  agreedPrice: OrderAgreedPrice!
+  snapshot: OrderSnapshot!
+  """
+  Exact booked start (the accepted or rescheduled slot). Gates Done / Failed.
+  """
+  bookedStart: DateTime!
+  bookedEnd: DateTime
+  pendingRequest: OrderPendingRequest
+  rescheduleHistory: [OrderReschedule!]!
+  myCloseAction: OrderCloseAction
+  counterpartyCloseAction: OrderCloseAction
+  """
+  When the other party is auto-marked Done (7 days after a one-sided Done).
+  """
+  autoDoneAt: DateTime
+  """
+  When the order reached COMPLETED or CANCELLED.
+  """
+  closedAt: DateTime
+  createdAt: DateTime! @column(overrideType: "Date")
+  task: Task!
+}
+
+input MyOrdersFilter {
+  status: [OrderStatus!]
+  role: OrderPartyRole
+}
+
+type AcceptQuotePayload {
+  task: Task!
+  order: Order!
+}
+
+extend type Query {
+  """
+  Load an order by id (authenticated party only) or by task id (viewer's booking on that task).
+  Pass exactly one of `id` or `taskId`. Prefer `task(id) { viewerOrder }` on task detail.
+  """
   order(id: ID, taskId: ID): Order
-  """BE-42/43 @admin — newest tasks first. Empty/omitted filter = latest page."""
-  adminTasks(filter: AdminTaskFilter, first: Int = 50): [Task!]!
-  """BE-43 @admin — full related records for one task."""
-  adminTask(id: ID!): AdminTaskDossier!
-  """BE-42 @admin — search workers by text and/or id."""
-  adminWorkers(search: String, id: ID, first: Int = 50): [worker!]!
-  """BE-43 @admin — search users by email, name, and/or id."""
-  adminUsers(search: String, id: ID, first: Int = 50): [User!]!
-  """BE-44 @admin — Mongo-authoritative ops KPIs."""
-  adminOpsSummary(
-    range: AdminOpsRange!
-    dateFrom: DateTime
-    dateTo: DateTime
-  ): AdminOpsSummary!
-  """
-  BE-46 @admin — full ops report inbox. Newest first. Paginate with after.
-  Omit status for all statuses. Pass targetType: TASK for the default inbox.
-  """
-  adminReports(
-    status: ReportStatus
-    targetType: ReportTargetType
-    first: Int = 50
-    after: String
-  ): ReportPage!
-  """
-  BE-40 env-allowlist path kept for existing tools. No targetType arg —
-  the panel filters TASK client-side when falling back.
-  """
-  reports(
-    status: ReportStatus
-    first: Int = 50
-    after: String
-  ): ReportPage!
-  """BE-48 @admin — product feedback counts (total / open / reviewed / replied)."""
-  adminFeedbackSummary: AdminFeedbackSummary!
-  """
-  BE-48 @admin — product feedback inbox. Newest first. Paginate with after.
-  Omit status/category for all. Distinct from adminReports.
-  """
-  adminFeedbacks(
-    status: FeedbackStatus
-    category: FeedbackCategory
-    first: Int = 50
-    after: String
-  ): FeedbackPage!
-  """
-  BE-48 @admin — templated reply quoting this feedback. Query form.
-  Does not send email.
-  """
-  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
 }
 
-type Mutation {
+extend type Mutation {
+  """
+  Either party, before the booked start, while ACTIVE: propose 1-2 new slots → RESCHEDULING.
+  """
+  requestReschedule(orderId: ID!, proposedSlots: [TimeSlotInput!]!): Order!
+    @auth
+  """
+  The other party picks one proposed slot → ACTIVE with the new booked time.
+  """
+  confirmReschedule(orderId: ID!, slotId: ID!): Order! @auth
+  """
+  The other party rejects the request → ACTIVE with the old booked time.
+  """
+  declineReschedule(orderId: ID!): Order! @auth
+  """
+  The requester withdraws their reschedule request → ACTIVE.
+  """
+  cancelRescheduleRequest(orderId: ID!): Order! @auth
+  """
+  Either party asks to cancel: before the booked start (→ CANCEL_REQUESTED), or while CONFLICT.
+  """
+  requestOrderCancellation(orderId: ID!): Order! @auth
+  """
+  The other party agrees → CANCELLED.
+  """
+  acceptOrderCancellation(orderId: ID!): Order! @auth
+  """
+  The other party refuses → back to ACTIVE (or stays CONFLICT).
+  """
+  declineOrderCancellation(orderId: ID!): Order! @auth
+  """
+  The requester withdraws their cancellation request.
+  """
+  withdrawOrderCancellation(orderId: ID!): Order! @auth
+  """
+  Either party, on or after the booked start, while ACTIVE. Done means the work is
+  finished and the C2C payment is settled.
+  """
+  markOrderDone(orderId: ID!): Order! @auth
+  """
+  Either party, on or after the booked start, while ACTIVE. The reason stays private.
+  """
+  markOrderFailed(orderId: ID!, reason: OrderFailedReason!): Order! @auth
+}
+
+"""
+Public Slashie Unlimited catalog for the /pricing page (Stripe-backed).
+"""
+type Pricing {
+  productName: String!
+  description: String
+  """
+  Amount in minor currency units (e.g. 1999 = £19.99).
+  """
+  priceAmount: Int!
+  priceCurrency: String!
+  priceInterval: String!
+  """
+  Free-trial length in days (e.g. 180 for a 6-month trial).
+  """
+  trialDays: Int
+  """
+  Human-readable trial label for marketing copy (e.g. "6 months free").
+  """
+  trialLabel: String
+  """
+  Free-tier monthly allowance: distinct tasks a worker may newly quote, without a subscription.
+  """
+  freeQuotesPerMonth: Int!
+  """
+  Stripe Price id for future Checkout integration.
+  """
+  stripePriceId: String!
+  """
+  Stripe Product id for future Checkout integration.
+  """
+  stripeProductId: String
+}
+
+extend type Query {
+  """
+  Public worker subscription pricing (Slashie Unlimited). No auth required.
+  """
+  pricing: Pricing!
+}
+
+enum QuoteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  REJECTED
+  """
+  Previous quote after an append overwrite, or a withdrawn quote.
+  Product reads omit EXPIRED rows.
+  """
+  EXPIRED
+}
+
+type Quote
+  @entity(
+    additionalFields: [
+      { path: "pricePence", type: "number" }
+      { path: "priceCurrency", type: "string" }
+      {
+        path: "proposedSlots"
+        type: "Array<{ id: IdDoc['_id'], start: Date, end: Date | null }>"
+      }
+    ]
+  )
+{
+  id: ID! @id
+  taskId: ID! @link
+  workerUserId: ID! @link
+  task: Task!
+  worker: User!
+  price: Price
+  message: String @column
+  """
+  The worker's 1-2 exact slots. The owner picks one on `acceptQuote`.
+  """
+  proposedSlots: [TimeSlot!]!
+  status: QuoteStatus! @column
+  createdAt: DateTime! @column(overrideType: "Date")
+}
+
+input AddQuoteInput {
+  taskId: ID!
+  price: PriceInput!
+  message: String
+  """
+  1-2 exact slots the worker can do the job.
+  """
+  proposedSlots: [TimeSlotInput!]!
+}
+
+extend type Mutation {
+  """
+  Worker submits a quote, or updates a pending quote by inserting another row
+  for the same task. The previous live quote for that worker and task becomes
+  EXPIRED. Free tier allows 3 distinct tasks per UTC month that still have a
+  non-EXPIRED quote created that month. Edits on a live quote do not use
+  another slot. After withdraw, that task no longer counts until quoted again.
+  Unlimited and Pro memberships bypass the cap.
+  Blocked while this worker has an ACCEPTED quote on the task.
+  `QUOTE_RECEIVED` is emitted only for the first quote, not for append updates.
+  """
+  addQuote(input: AddQuoteInput!): Quote! @auth
+  """
+  Worker withdraws their own pending quote before it is accepted.
+  Sets every live quote for that task and worker to EXPIRED. Accepted quotes
+  cannot be withdrawn. The task drops out of the worker pipeline and
+  `Task.quotes`. A later `addQuote` inserts a new PENDING row.
+  """
+  withdrawQuote(quoteId: ID!): Quote! @auth
+  """
+  Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
+  """
+  declineQuote(quoteId: ID!): Quote! @auth
+}
+
+enum ReportTargetType {
+  TASK
+  WORKER
+  USER
+  REVIEW
+  """
+  A chat message (`ThreadItem` id). The reporter must be able to see it and not
+  be its author; the message text is stored as `targetLabel` for review.
+  """
+  MESSAGE
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  ILLEGAL_OR_PROHIBITED
+  SCAM
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  ACTIONED
+  DISMISSED
+}
+
+"""
+A trust-and-safety report against a task, worker profile, user, or review.
+Reporters see the create payload. Ops list via `@admin` `adminReports`
+(and the BE-40 env-allowlist `reports` query). There is no public list.
+"""
+type Report
+  @entity(
+    additionalFields: [
+      { path: "reporterUserId", type: "IdDoc['_id']" }
+      { path: "targetId", type: "IdDoc['_id']" }
+      { path: "reporterEmail", type: "string | null" }
+      { path: "targetLabel", type: "string | null" }
+    ]
+  )
+{
+  id: ID! @id
+  reporterUserId: ID!
+  """
+  Live reporter User when the account still exists. Admin-shaped for ops
+  (email, verification, disabled). Null if the user row was deleted.
+  """
+  reporter: User
+  """
+  Email snapshot at report time. Useful if the user row is later deleted.
+  """
+  reporterEmail: String
+  targetType: ReportTargetType! @column
+  targetId: ID!
+  reason: ReportReason! @column
+  details: String @column
+  status: ReportStatus! @column
+  """
+  Snapshot URL on slashie.app for ops (task or worker page).
+  """
+  targetUrl: String @column
+  """
+  Snapshot label at report time: task title, worker legal name, or user
+  profile name. Use this for TASK title in the ops inbox.
+  """
+  targetLabel: String
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime! @column(overrideType: "Date")
+}
+
+type ReportPage {
+  items: [Report!]!
+  """
+  Opaque cursor (`report` id) for the next page, or null when there are no more items.
+  """
+  nextCursor: String
+}
+
+input CreateReportInput {
+  targetType: ReportTargetType!
+  targetId: ID!
+  reason: ReportReason!
+  """
+  Optional free-text context. Trimmed and capped at 2000 characters.
+  """
+  details: String
+}
+
+extend type Mutation {
+  """
+  Submit a report against a task, worker profile, user, or review. Auth required.
+  Rate-limited per user and IP. Rejects self-reports and unknown targets.
+  """
+  createReport(input: CreateReportInput!): Report! @auth
+  """
+  Env-allowlist ops: set report status. Requires ADMIN_USER_IDS or
+  ADMIN_EMAILS. Prefer `adminUpdateReportStatus` (`@admin`) for the panel.
+  """
+  updateReportStatus(id: ID!, status: ReportStatus!): Report! @auth
+}
+
+extend type Query {
+  """
+  Env-allowlist report inbox (BE-40). Requires ADMIN_USER_IDS or
+  ADMIN_EMAILS. Newest first. Prefer `adminReports` (`@admin`) for the
+  private admin panel. Not visible to reporters or the public.
+  """
+  reports(status: ReportStatus, first: Int = 50, after: String): ReportPage!
+    @auth
+}
+
+"""
+Which side of a completed order wrote the review.
+"""
+enum ReviewPartyRole {
+  CUSTOMER
+  WORKER
+}
+
+"""
+Light abuse signals stored on the review for the ops queue.
+Not returned on the public review type.
+"""
+enum ReviewAbuseFlag {
+  BURST
+  IDENTICAL_TEXT
+  REVIEW_THEN_DELETE
+}
+
+"""
+One party's review of the other party on a completed order.
+Stars are 1–5. `comment` is optional. Hidden rows stay in the database.
+"""
+type Review
+  @entity(
+    additionalFields: [
+      { path: "taskId", type: "IdDoc['_id']" }
+      { path: "orderId", type: "IdDoc['_id']" }
+      { path: "authorUserId", type: "IdDoc['_id']" }
+      { path: "subjectUserId", type: "IdDoc['_id']" }
+      { path: "orderClosedAt", type: "Date" }
+      { path: "hiddenAt", type: "Date | null" }
+      { path: "hiddenByUserId", type: "IdDoc['_id'] | null" }
+      { path: "abuseFlags", type: "string[]" }
+    ]
+  )
+{
+  id: ID! @id
+  taskId: ID!
+  orderId: ID!
+  authorUserId: ID!
+  subjectUserId: ID!
+  authorRole: ReviewPartyRole! @column
+  stars: Int! @column
+  comment: String @column
+  createdAt: DateTime! @column(overrideType: "Date")
+  updatedAt: DateTime! @column(overrideType: "Date")
+  """
+  Submit time plus 48 hours. Edits after this instant are rejected.
+  """
+  editableUntil: DateTime!
+  """
+  Set when the author or an admin soft-hides the review. The row is kept.
+  """
+  hiddenAt: DateTime
+}
+
+"""
+What the signed-in party can see and do for reviews on one order.
+"""
+type OrderReviewState {
+  """
+  True when this party is on a COMPLETED order and has not used their one review.
+  """
+  canSubmit: Boolean!
+  """
+  The viewer's review, including after they soft-hide it. Null before submit.
+  """
+  viewerReview: Review
+  """
+  The other party's review, or null while it is locked, missing, or hidden.
+  """
+  counterpartReview: Review
+  """
+  True when `counterpartReview` is populated.
+  """
+  counterpartVisible: Boolean!
+  """
+  `closedAt` plus 14 days. After this instant the other party's review is
+  visible even if only one party has submitted. Null when the order has no
+  `closedAt`.
+  """
+  counterpartUnlocksAt: DateTime
+  """
+  True once the viewer has submitted their review (a later soft-hide still counts).
+  Clients should hide the receipt call-to-action until this is true. The receipt
+  API itself authorizes any party on the completed order.
+  """
+  viewerHasSubmittedReview: Boolean!
+}
+
+"""
+C2C job summary PDF for a completed order. Not a Slashie tax invoice.
+"""
+type OrderReceipt {
+  filename: String!
+  contentType: String!
+  """
+  PDF bytes, base64-encoded.
+  """
+  pdfBase64: String!
+  """
+  The disclaimer printed on the PDF.
+  """
+  disclaimer: String!
+}
+
+type AdminReviewSignal {
+  review: Review!
+  abuseFlags: [ReviewAbuseFlag!]!
+}
+
+type AdminReviewSignalPage {
+  items: [AdminReviewSignal!]!
+  """
+  Opaque cursor (review id) for the next page, or null when there are no more items.
+  """
+  nextCursor: String
+}
+
+input CreateReviewInput {
+  orderId: ID!
+  """
+  Integer 1–5.
+  """
+  stars: Int!
+  """
+  Optional. Trimmed, empty becomes null, capped at 1000 characters.
+  """
+  comment: String
+}
+
+input UpdateReviewInput {
+  stars: Int
+  """
+  Pass null to clear the comment. Omit to leave it unchanged.
+  """
+  comment: String
+}
+
+extend type Order {
+  """
+  Review eligibility and the reviews this party is allowed to see.
+  """
+  reviewState: OrderReviewState!
+}
+
+extend type Query {
+  """
+  Review state for one order. Caller must be a party on the order.
+  """
+  orderReviews(orderId: ID!): OrderReviewState! @auth
+  """
+  C2C job-summary PDF for a completed order. Caller must be a party.
+  This is not a Slashie tax invoice. Clients should still wait until
+  `viewerHasSubmittedReview` before showing the download action.
+  """
+  orderReceipt(orderId: ID!): OrderReceipt! @auth
+  """
+  Reviews flagged for burst posting, identical comments, or review-then-delete.
+  Newest first. Ops only.
+  """
+  adminReviewSignals(first: Int = 50, after: String): AdminReviewSignalPage!
+    @admin
+}
+
+extend type Mutation {
+  """
+  Submit the caller's one review for a COMPLETED order. Open to either party,
+  not a founding cohort. Rate-limited to 10 reviews per account per UTC day.
+  """
+  createReview(input: CreateReviewInput!): Review! @auth
+  """
+  Change stars and/or comment within 48 hours of submit. Rejected after that,
+  and rejected once the review is hidden.
+  """
+  updateReview(id: ID!, input: UpdateReviewInput!): Review! @auth
+  """
+  Author soft-hide. The row stays for audit and the one-review slot stays used.
+  Flags REVIEW_THEN_DELETE for the ops queue.
+  """
+  hideReview(id: ID!): Review! @auth
+  """
+  Ops soft-hide. Keeps the row. Does not add the author review-then-delete flag.
+  """
+  adminHideReview(id: ID!): Review! @admin
+}
+
+"""
+Presigned upload URL (PUT). Task objects use prefix `tasks/<taskId>/…`; public read is via Space bucket policy (or CDN env), not per-upload ACL.
+"""
+type S3URL {
+  """
+  Time-limited HTTPS URL for a PUT upload to object storage.
+  """
+  url: String
+  """
+  Public read URL for the uploaded object (for persisting after a successful PUT).
+  """
+  publicUrl: String
+}
+
+extend type Query {
+  """
+  Generates one pre-signed S3 PUT URL for uploading a task file; requires authentication.
+  Caller must be the task creator.
+  """
+  getTaskS3Upload(
+    """
+    Task id. Must belong to the authenticated user.
+    """
+    taskId: ID!
+    """
+    File key under `tasks/<taskId>/<index>` (for example `0.jpg`).
+    """
+    index: String!
+  ): [S3URL!]! @auth
+  """
+  Generates a pre-signed S3 PUT URL for the authenticated user's profile avatar
+  under `users/<userId>/<filename>`. Persist `publicUrl` via `updateMyProfile`
+  after a successful upload.
+  """
+  getProfileAvatarUpload(
+    """
+    File name under `users/<userId>/<filename>` (for example `avatar.jpg`).
+    """
+    filename: String!
+  ): S3URL! @auth
+}
+
+enum TaskContactMethod {
+  """
+  Share the phone number from the poster's profile.
+  """
+  PHONE
+  """
+  Share the email from the poster's profile.
+  """
+  EMAIL
+  """
+  Keep communication inside the app only.
+  """
+  IN_APP
+}
+
+enum TaskDateTimeType {
+  BEFORE
+  FLEXIBLE
+  EXACT
+}
+
+enum TaskBudgetType {
+  ONE_OFF
+  PER_DAY
+  PER_HOUR
+}
+
+"""
+Map-backed coordinates and place label used for discovery and distance.
+"""
+type TaskLocation {
+  """
+  Latitude in decimal degrees (may be rounded for public listings).
+  """
+  lat: Float
+  """
+  Longitude in decimal degrees (may be rounded for public listings).
+  """
+  lng: Float
+  """
+  Place name or label; obfuscated for non-participants on search.
+  """
+  name: String
+  """
+  Full street address for the task location.
+  """
+  address: String
+}
+
+input TaskLocationInput {
+  """
+  Latitude in decimal degrees.
+  """
+  lat: Float!
+  """
+  Longitude in decimal degrees.
+  """
+  lng: Float!
+  """
+  Place name or label from the map provider (for example Mapbox).
+  """
+  name: String!
+  """
+  Full street address for the task location.
+  """
+  address: String!
+}
+
+type TaskDateTime {
+  date: String
+  time: String
+  type: TaskDateTimeType!
+}
+
+input TaskDateTimeInput {
+  date: String
+  time: String
+  type: TaskDateTimeType!
+}
+
+type TaskBudget {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+input TaskBudgetInput {
+  amount: Float!
+  currency: Currency!
+  type: TaskBudgetType!
+  paymentMethod: TaskPaymentMethod!
+}
+
+input AcceptQuoteInput {
+  """
+  Quote to accept for the task.
+  """
+  quoteId: ID!
+  """
+  One of the quote's `proposedSlots`; becomes the order's booked time. Must still be in the future.
+  """
+  selectedSlotId: ID!
+  """
+  Optional location update when accepting.
+  """
+  location: LocationInput
+}
+
+enum TaskStatus {
+  """
+  Draft task not yet visible.
+  """
+  DRAFT
+  """
+  Open for worker quotes.
+  """
+  OPEN
+  """
+  A worker has been chosen.
+  """
+  AWARDED
+  """
+  Task cancelled.
+  """
+  CANCELLED
+}
+
+enum TaskPaymentMethod {
+  """
+  Cash payment on completion or as agreed.
+  """
+  CASH
+  """
+  Payment by bank transfer.
+  """
+  BANK_TRANSFER
+}
+
+type Task
+  @entity(
+    additionalFields: [
+      {
+        path: "location"
+        type: "{ lat: number, lng: number, name: string, address: string }"
+      }
+      {
+        path: "datetime"
+        type: "{ date?: string, time?: string, type: string } | null"
+      }
+      {
+        path: "budget"
+        type: "{ amount: number, currency: string, type: string, paymentMethod: string }"
+      }
+      { path: "createdByUserId", type: "IdDoc['_id']" }
+      { path: "contactMethod", type: "string | null" }
+      { path: "createdAt", type: "Date" }
+      {
+        path: "timeline"
+        type: "{ type: string, timestamp: Date, actorUserId: IdDoc['_id'], data: Record<string, unknown> }[]"
+      }
+    ]
+  )
+{
+  """
+  Task identifier.
+  """
+  id: ID! @id
+  """
+  Short title shown in lists and search.
+  """
+  title: String! @column
+  """
+  Longer description of the work required.
+  """
+  description: String! @column
+  """
+  Normalized task category used by discovery filters and cards.
+  """
+  category: String! @column
+  """
+  Task budget.
+  """
+  budget: TaskBudget
+  """
+  Task date/time preference.
+  """
+  datetime: TaskDateTime
+
+  """
+  Gallery image URLs; resolved from object storage under `tasks/<taskId>/` (not stored in MongoDB).
+  """
+  images: [String!]!
+  """
+  Workflow status of the task.
+  """
+  status: TaskStatus! @column
+  """
+  When true, the task is hidden from public map discovery. Set by ops via
+  `adminUpdateTask`.
+  """
+  hidden: Boolean! @column
+  """
+  When the task row was created. Persisted on `createTask`.
+  """
+  createdAt: DateTime!
+  """
+  `timeline` is a list of events that have occurred on the task. It is used to track the history of the task and to display the timeline of the task.
+  """
+  timeline: [TaskTimelineEvent!]! @column
+
+  """
+  Poster (task owner). Always resolves when task data is available.
+  Public and pending-quote viewers get the redacted `User` shell (name and
+  avatar via the same helper as `Query.user`; email blanked). Assigned
+  workers see contact fields. For a profile peek whose schema cannot request
+  private fields, use `user(id:)`.
+  """
+  poster: User
+  """
+  Coordinates and label. Full precision and street address for the poster and the accepted worker; discovery-style for public and pending-quote workers.
+  """
+  location: TaskLocation!
+  """
+  Latest active quote per worker (EXPIRED and WITHDRAWN omitted).
+  Visible to any authenticated viewer; guests get an empty list.
+  `price` is non-null for the poster and for the worker who sent that quote.
+  """
+  quotes: [Quote!]!
+
+  """
+  The authenticated viewer's order on this task, if they are customer or worker. Null for guests or non-parties.
+  Replaces `order(taskId:)` on task detail pages.
+  """
+  orders: [Order!]!
+  """
+  Non-owner task detail views (PostHog, last 90 days). Public; 0 when PostHog is unavailable.
+  """
+  views: Int!
+}
+
+type TaskTimelineEvent {
+  type: TaskTimelineEventType!
+  timestamp: DateTime! @column(overrideType: "Date")
+  actor: User!
+  data: JSON!
+}
+
+enum TaskTimelineEventType {
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_CANCELLED
+}
+
+input CreateTaskInput {
+  """
+  Short title for the task.
+  """
+  title: String!
+  """
+  Detailed description of the job.
+  """
+  description: String!
+  """
+  Product-defined task category (for example cleaning, moving, repairs).
+  """
+  category: String!
+  """
+  Budget and currency.
+  """
+  budget: TaskBudgetInput!
+  """
+  Map-derived coordinates and place name for search.
+  """
+  location: TaskLocationInput!
+  """
+  Date and time preference (before/flexible/exact).
+  """
+  datetime: TaskDateTimeInput
+  """
+  Which profile contact channel may be shared with workers.
+  """
+  preferredContactMethod: TaskContactMethod!
+  """
+  Additional image URLs or keys after upload.
+  """
+  images: [String!] = []
+}
+
+"""
+Partial amendments to an existing task. Every field is optional; only provided
+fields are changed. Editable only by the poster while the task is still
+`OPEN`/`DRAFT`.
+"""
+input UpdateTaskInput {
+  """
+  Short title for the task.
+  """
+  title: String
+  """
+  Detailed description of the job.
+  """
+  description: String
+  """
+  Product-defined task category (for example cleaning, moving, repairs).
+  """
+  category: String
+  """
+  Budget and currency.
+  """
+  budget: TaskBudgetInput
+  """
+  Map-derived coordinates and place name for search.
+  """
+  location: TaskLocationInput
+  """
+  Date and time preference (before/flexible/exact). Pass null to clear.
+  """
+  datetime: TaskDateTimeInput
+  """
+  Which profile contact channel may be shared with workers (re-snapshotted from profile).
+  """
+  preferredContactMethod: TaskContactMethod
+}
+
+"""
+My Tasks hub buckets on `/tasks`.
+
+`OPEN` is posted drafts/open tasks, or a pending quote on an open task nobody else has been awarded.
+`BOOKED` is awarded or in-progress work, including an accepted quote or an active order.
+`COMPLETED` is finished, confirmed, cancelled, or otherwise closed for this viewer.
+"""
+enum MyTaskHubSection {
+  OPEN
+  BOOKED
+  COMPLETED
+}
+
+"""
+Shared list filter for discovery `tasks` and My Tasks hub lists
+(`User.tasksPosted`, `User.quotedTasks`, `worker.quotedTasks`).
+
+Per-query handling:
+- `lat`/`lng`/`radiusMiles`: used by `tasks` (map discovery); ignored by hub list fields.
+- `status`: applies to hub list fields; **ignored by `tasks`** (discovery is OPEN-only, enforced server-side).
+- `ownerUserId` and `hubSection`: apply to hub list fields; **ignored by `tasks`**.
+- `search`, `category`, and the date-range fields apply to every list above.
+
+Hub section narrowing keeps the Open / Booked / Completed IA. It does not merge
+those sections into one list. Hosted vs Quoted stays which field returned the
+task (`tasksPosted` vs `quotedTasks` / `worker.quotedTasks`); a task can be in both.
+"""
+input TaskFilter {
+  """
+  Map center latitude; defaults to central London when omitted. Used by `tasks` only.
+  """
+  lat: Float
+  """
+  Map center longitude; defaults to central London when omitted. Used by `tasks` only.
+  """
+  lng: Float
+  """
+  Map radius in miles from the center point (capped at 50). Omit (or null) for no
+  radius limit: every open task, nearest first. Must be greater than 0
+  (`INVALID_RADIUS`). Used by `tasks` only.
+  """
+  radiusMiles: Float
+  """
+  Case-insensitive substring match on title, description, place name, and category.
+  """
+  search: String
+  """
+  Optional category filter (case-insensitive exact match on the stored category string).
+  """
+  category: String
+  """
+  Poster/worker inbox: constrain by task status(es). Omit for all statuses. Ignored by `tasks`.
+  """
+  status: [TaskStatus!]
+  """
+  Task poster (`Task.user` / `createdByUserId`). Hub lists only. Ignored by discovery `tasks`.
+  """
+  ownerUserId: ID
+  """
+  Narrow My Tasks hub sections. Omit to include Open, Booked, and Completed.
+  An empty list matches nothing. Hub lists only. Ignored by discovery `tasks`.
+  """
+  hubSection: [MyTaskHubSection!]
+  """
+  Inclusive lower bound on `createdAt` (`createdAt >= value`).
+  """
+  createdAfter: DateTime
+  """
+  Inclusive upper bound on `createdAt` (`createdAt <= value`).
+  """
+  createdBefore: DateTime
+  """
+  Inclusive lower bound on the task's scheduled date (`datetime.date`). Compared at day granularity.
+  On discovery `tasks`, FLEXIBLE and undated tasks still match; My Tasks lists exclude them.
+  """
+  scheduledAfter: DateTime
+  """
+  Inclusive upper bound on the task's scheduled date (`datetime.date`). Compared at day granularity.
+  On discovery `tasks`, FLEXIBLE and undated tasks still match; My Tasks lists exclude them.
+  """
+  scheduledBefore: DateTime
+  """
+  Inclusive lower bound on the raw `budget.amount`, whatever the budget type
+  (one-off, per hour, per day). Must be >= 0 and <= `budgetMax` (`INVALID_BUDGET_RANGE`).
+  """
+  budgetMin: Float
+  """
+  Inclusive upper bound on the raw `budget.amount`, whatever the budget type.
+  """
+  budgetMax: Float
+}
+
+"""
+Sort order for list queries. Supplied as a sibling argument to `filter` (never nested inside it).
+When omitted, all list queries default to `CREATED_AT` `DESC` (except `tasks` with a geo center, which
+defaults to nearest-first distance ordering).
+"""
+input TaskSort {
+  field: TaskSortField!
+  direction: SortDirection!
+}
+
+enum TaskSortField {
+  """
+  Sort by task creation time.
+  """
+  CREATED_AT
+  """
+  Sort by the task's scheduled date/time; tasks without a schedulable date sort last.
+  """
+  SCHEDULED_AT
+  """
+  Sort alphabetically by title (case-insensitive).
+  """
+  TITLE
+  """
+  Sort by distance from the map center. Valid on `tasks` only, and only when `filter.lat` and
+  `filter.lng` are provided; rejected on other queries or without coordinates.
+  """
+  DISTANCE
+}
+
+enum SortDirection {
+  ASC
+  DESC
+}
+
+extend type Query {
+  """
+  Open tasks for discovery (map and search). Center defaults to London. No radius
+  limit unless `filter.radiusMiles` is passed. Nearest first by default.
+  `filter.status`, `filter.ownerUserId`, and `filter.hubSection` are ignored (always OPEN-only).
+  `Task.location` is discovery-style on map browse.
+  `DISTANCE` sort requires `filter.lat` and `filter.lng`.
+
+  Paging: `first` tasks per page (default and max 100). For the next page, pass the
+  last returned task's `id` as `after` with the same filter and sort. A full page
+  means there may be more; fewer than `first` means the end. If that task has since
+  closed, the next page still starts where it would have sorted. Unknown id:
+  `INVALID_CURSOR`.
+  """
+  tasks(
+    filter: TaskFilter
+    sort: TaskSort
+    first: Int = 100
+    after: ID
+  ): [Task!]!
+  """
+  Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
+  """
+  task(id: ID!): Task
+}
+
+extend type Mutation {
+  """
+  Create a task (customer \"post a task\"). Requires authentication via request header.
+  """
+  createTask(input: CreateTaskInput!): Task! @auth
+  """
+  Amend an existing task owned by the current user. Only allowed while the task
+  is `OPEN`/`DRAFT`; partial update (only provided fields change).
+  """
+  updateTask(taskId: ID!, input: UpdateTaskInput!): Task! @auth
+  """
+  Cancel an open task owned by the current user.
+  """
+  cancelTask(taskId: ID!): Task! @auth
+  """
+  Accept a worker's quote on one of its slots and create the Order (booked at that slot).
+  """
+  acceptQuote(input: AcceptQuoteInput!): AcceptQuotePayload! @auth
+}
+
+enum LoginMethod {
+  PASSWORD
+  GOOGLE
+  APPLE
+}
+
+enum UserLanguage {
+  EN
+  ZH_TW
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+type ForgotPasswordPayload {
+  success: Boolean!
+  cooldownSecondsRemaining: Int!
+  resetToken: String
+}
+
+type User
+  @entity(
+    additionalFields: [
+      { path: "passwordHash", type: "string | null" }
+      { path: "profileName", type: "string" }
+      { path: "profileContactNumber", type: "string" }
+      { path: "defaultPreferredContactMethod", type: "string" }
+      { path: "avatarUrl", type: "string" }
+      { path: "settingsPrivateProfile", type: "boolean" }
+      { path: "settingsMarketingEmails", type: "boolean" }
+      { path: "settingsLanguage", type: "string" }
+      { path: "passwordResetTokenHash", type: "string | null" }
+      { path: "passwordResetExpiresAt", type: "Date | null" }
+      { path: "dateOfBirth", type: "Date | null" }
+      { path: "emailVerifiedAt", type: "Date | null" }
+      { path: "phoneVerifiedAt", type: "Date | null" }
+      { path: "pendingPhoneE164", type: "string | null" }
+      # New email awaiting verification (`requestEmailChange`); `email` stays live until then.
+      { path: "pendingEmail", type: "string | null" }
+      { path: "phoneVerificationRateWindowStart", type: "Date | null" }
+      { path: "phoneVerificationSendCount", type: "number" }
+      { path: "emailVerificationLastSentAt", type: "Date | null" }
+      # Omitted for email/password users.
+      # Unique only when the value is a string (partial index).
+      { path: "googleSub?", type: "string | null" }
+      # Sign in with Apple subject. Omitted unless linked; partial unique index.
+      { path: "appleSub?", type: "string | null" }
+      { path: "disabled", type: "boolean" }
+      # Admin announcement segments only. Not a review-eligibility gate.
+      { path: "notificationCohortKeys?", type: "string[]" }
+    ]
+  )
+{
+  id: ID! @id
+  email: String! @column
+  """
+  Whether this account's email address has been verified (`emailVerifiedAt` is set).
+  """
+  emailVerified: Boolean!
+  """
+  When the email was verified. Null until verified.
+  """
+  emailVerifiedAt: DateTime
+  """
+  Whether this account's phone number is verified (Twilio Verify; `phoneVerifiedAt` is set).
+  """
+  phoneVerified: Boolean!
+  """
+  When the phone was verified. Null until verified.
+  """
+  phoneVerifiedAt: DateTime
+  """
+  New email waiting for its verify link (`requestEmailChange`). `email` stays
+  live until then. Owner only (`me`); null for everyone else.
+  """
+  pendingEmail: String
+  """
+  New phone (E.164) waiting for its SMS code (`sendPhoneVerification`). The
+  saved number stays live until `verifyPhone`. Owner only (`me`).
+  """
+  pendingPhone: String
+  """
+  Tasks the user posted.
+  """
+  tasksPosted(filter: TaskFilter, sort: TaskSort): [Task!]!
+  """
+  Orders where this user is customer or worker.
+  """
+  orders(filter: MyOrdersFilter): [Order!]!
+  """
+  Messages inbox: task threads and the Slashie system thread this user takes
+  part in, most recently active first. Owner-only (`me`); empty for other viewers.
+  """
+  threads: [Thread!]!
+  """
+  Unread items across all threads (the Messages badge). Owner-only (`me`); 0 for others.
+  """
+  unreadMessageCount: Int!
+  """
+  Tasks this user has quoted on (any quote status). Owner-only (`me`); empty for other viewers.
+  Prefer over nested `worker.quotedTasks` when `me.worker` may be null.
+  """
+  quotedTasks(filter: TaskFilter, sort: TaskSort): [Task!]!
+  """
+  Distinct category strings on this user's My Tasks hub: tasks they posted,
+  plus tasks they still have a product-visible quote on. Unfiltered, so category
+  chips stay stable while search, owner, and section filters change.
+  Owner-only (`me`); empty for other viewers. Case-insensitive unique, sorted.
+  """
+  hubTaskCategories: [String!]!
+  """
+  My Tasks achievements for the authenticated owner (`me`).
+
+  Two panels: work this account did as a worker, and tasks this account hosted
+  as a customer. An order is counted in only one panel for a given role, so a
+  dual-role account is not summed twice inside either panel.
+
+  Money fields are agreed quote amounts on `COMPLETED` orders (off-platform
+  settlement between customer and worker). Subscription charges are not
+  included. Empty shell for every other viewer.
+  """
+  taskAchievements: MyTasksAchievements!
+  createdAt: DateTime! @column(overrideType: "Date")
+  """
+  When true, `@auth` actions are rejected with `ACCOUNT_DISABLED` except
+  `Query.me` (so clients can show a suspended state). Password and Google
+  login still succeed and return this flag. Password reset stays blocked.
+  Set by ops via `adminSetUserDisabled`.
+  """
+  disabled: Boolean!
+  """
+  `PASSWORD` when a password is set, `GOOGLE` / `APPLE` when that account is linked.
+  """
+  enabledLoginMethods: [LoginMethod!]!
+  profile: Profile!
+  worker: worker
+  settings: UserSettings!
+  """
+  True when the user satisfies worker-eligibility requirements. Only meaningful
+  for the authenticated owner (`me`); false for other viewers.
+  """
+  workerEligibility: Boolean!
+}
+
+type Profile {
+  """
+  Canonical display name for the user.
+  """
+  name: String
+  contactNumber: String
+  avatarUrl: String
+  defaultPreferredContactMethod: TaskContactMethod
+  """
+  Date of birth. Owner-only (private): returned as null for non-owner viewers.
+  """
+  dateOfBirth: DateTime
+  """
+  Whether the owner's email is verified. Owner-only: false for other viewers.
+  """
+  emailVerified: Boolean!
+  """
+  Whether the owner's phone number is verified. Owner-only: false for other viewers.
+  """
+  phoneVerified: Boolean!
+}
+
+type UserSettings {
+  isProfilePrivate: Boolean!
+  marketingEmails: Boolean!
+  language: UserLanguage!
+}
+
+"""
+Display name and avatar for a public profile peek.
+Contact number, date of birth, and verification flags are not on this type.
+"""
+type PublicUserProfile {
+  """
+  Canonical display name. Null when the account has no name set.
+  """
+  name: String
+  """
+  Public avatar URL. Null when the account has no avatar.
+  """
+  avatarUrl: String
+}
+
+"""
+Directory-visible worker profile linked from a public user.
+Load trust stats and completed jobs with `worker(id:)`.
+"""
+type PublicUserWorker {
+  id: ID!
+}
+
+"""
+Public user profile for a marketplace peek (task poster or any other account).
+
+Always this shell, including when the viewer is the subject or an admin.
+Use `me` for the authenticated account (email, phone, settings, orders,
+messages, quoted tasks).
+
+Anonymous access is allowed. Null when the id is invalid or missing, the
+account is disabled, or `settings.isProfilePrivate` is true.
+"""
+type PublicUser {
+  id: ID!
+  profile: PublicUserProfile!
+  """
+  When the account was created. Same instant as `createdAt`.
+  """
+  memberSince: DateTime!
+  """
+  When the account was created.
+  """
+  createdAt: DateTime!
+  """
+  Tasks this user posted that are publicly discoverable: status `OPEN` and
+  not `hidden`. Newest first. Visitor-safe task fields (same redaction as
+  `Query.tasks` / public `task(id)`).
+
+  `first` defaults to 10 and is capped at 20. Values below 1 are treated as 1.
+  `excludeTaskId` omits one task (for "other open tasks" on task detail).
+  An invalid `excludeTaskId` is ignored.
+  """
+  openTasks(first: Int = 10, excludeTaskId: ID): [Task!]!
+  """
+  Count of publicly discoverable `OPEN` tasks, honoring `excludeTaskId`
+  the same way `openTasks` does.
+  """
+  openTaskCount(excludeTaskId: ID): Int!
+  """
+  Linked worker profile when one exists and is visible in the directory
+  (setup complete). Null for drafts.
+  """
+  worker: PublicUserWorker
+}
+
+enum PublicProfileUserType {
+  """
+  No directory-visible worker profile. The account can still host tasks.
+  """
+  CUSTOMER
+  """
+  A directory-visible worker profile exists (setup complete).
+  """
+  WORKER
+}
+
+"""
+Which side of a completed order this account was on.
+"""
+enum PublicProfileWorkRole {
+  """
+  This account hosted the task.
+  """
+  CUSTOMER
+  """
+  This account did the work.
+  """
+  WORKER
+}
+
+"""
+Identity for `createReport` from `/profile/[userId]`.
+Always `USER` and the profile user id — not the worker document id.
+"""
+type PublicProfileReportTarget {
+  targetType: ReportTargetType!
+  targetId: ID!
+}
+
+"""
+Directory-visible worker section on a public profile.
+
+About, skills, an approximate service area, and completed-job rows.
+No street address, coordinates, membership, or agreed amounts.
+"""
+type PublicProfileWorker {
+  """
+  Worker document id. Not the profile URL — use `PublicProfile.id`.
+  """
+  id: ID!
+  """
+  About text (worker bio).
+  """
+  bio: String
+  tagline: String
+  primaryCategory: WorkerPrimaryCategory
+  skills: [String!]!
+  qualifications: [String!]!
+  """
+  Approximate service area, e.g. "Camden & Islington (~5 miles)".
+  Same label as `worker.serviceAreaLabel`. Never a street address or lat/lng.
+  """
+  serviceAreaLabel: String
+  yearsExperience: Int
+  portfolioUrls: [String!]!
+  isVerified: Boolean!
+  """
+  Trust flag only. The phone number is not on this type.
+  """
+  phoneVerified: Boolean!
+  """
+  Trust flag only. The email address is not on this type.
+  """
+  emailVerified: Boolean!
+  """
+  Quotes sent, withdrawn quotes excluded. Not the monthly allowance.
+  """
+  quotesSentCount: Int!
+  """
+  Completed platform jobs, newest first. No prices.
+  """
+  completedJobs: [WorkerCompletedJob!]!
+  """
+  Save / review / contact state. Null when the viewer is anonymous;
+  clients treat that as sign-in required (same as `worker.viewer`).
+  """
+  viewer: WorkerProfileViewer
+}
+
+"""
+One completed order for the owner's calendar and searchable history.
+No agreed amount. Area is borough/city, not a street.
+"""
+type PublicProfileWorkHistoryItem {
+  orderId: ID!
+  taskId: ID!
+  role: PublicProfileWorkRole!
+  title: String!
+  category: String!
+  """
+  Borough/city area. A leading street segment is dropped.
+  """
+  areaLabel: String
+  completedAt: DateTime!
+}
+
+"""
+Public profile for `/profile/[userId]`.
+
+Anonymous access is allowed. Null when the id is invalid or missing, the
+account is disabled (suspended or banned — stored as `disabled`), or
+`settings.isProfilePrivate` is true. That null is the empty public shell
+and does not say which case it was, including when the viewer is the subject.
+Owners of a hidden profile use `me` for private account data.
+
+`taskAchievements` and `workHistory` are null unless the authenticated
+viewer is this user. Strangers do not receive agreed totals, streaks,
+quote allowance, or the day-level history list.
+
+Never includes email, phone, street address, or Stripe ids.
+"""
+type PublicProfile {
+  """
+  Stable user id (`users._id`). Same id as `/user/[id]`, `Query.user(id:)`,
+  and `me.id`.
+  """
+  id: ID!
+  """
+  True when the JWT subject is this user. Computed on the server.
+  """
+  isSelf: Boolean!
+  """
+  `WORKER` when `worker` is present. Otherwise `CUSTOMER`.
+  """
+  userType: PublicProfileUserType!
+  profile: PublicUserProfile!
+  """
+  When the account was created.
+  """
+  memberSince: DateTime!
+  """
+  Tasks this user posted that are publicly discoverable: status `OPEN` and
+  not `hidden`. Newest first. Same redaction and limits as `PublicUser.openTasks`.
+  """
+  openTasks(first: Int = 10, excludeTaskId: ID): [Task!]!
+  """
+  Count of publicly discoverable `OPEN` tasks, honoring `excludeTaskId`.
+  """
+  openTaskCount(excludeTaskId: ID): Int!
+  """
+  Unlocked reviews about this user, as worker or customer. Hidden and
+  still-locked rows are omitted. Same mutual-unlock rule as worker reviews:
+  both parties have a review row, or 14 days have passed since completion.
+  Newest first.
+  """
+  reviews: [Review!]!
+  """
+  Unlocked reviews about this user. `average` stays null until `count` is
+  at least 3.
+  """
+  ratingSummary: WorkerRatingSummary!
+  """
+  Present when a directory-visible worker profile exists. Null for customers
+  and for workers who have not finished setup.
+  """
+  worker: PublicProfileWorker
+  """
+  Pass to `createReport`. `targetType` is `USER` and `targetId` is `id`.
+  """
+  reportTarget: PublicProfileReportTarget!
+  """
+  Same payload as `me.taskAchievements`, including agreed totals, streaks,
+  and quote allowance. Null for every other viewer.
+  """
+  taskAchievements: MyTasksAchievements
+  """
+  Completed orders only (canceled and any non-completed status, including a
+  future disputed status, are excluded). Newest first, capped at 200.
+  A self-hired order (same account on both sides) appears once, as `WORKER`.
+
+  Null for every viewer who is not this user. Omit `search` to feed a
+  calendar; pass `search` for a case-insensitive match on title, category,
+  and area label. Agreed amounts are not on these rows.
+  """
+  workHistory(search: String): [PublicProfileWorkHistoryItem!]
+}
+
+input LoginInput {
+  method: LoginMethod! = PASSWORD
+  email: String
+  password: String
+  """
+  `GOOGLE`: Google ID token. `APPLE`: Sign in with Apple identity token (audience
+  = web Services ID or iOS bundle ID). Invalid or expired: `INVALID_OAUTH_TOKEN`.
+  A first Google / Apple login whose email matches an existing account links to it
+  only when that account's email is verified and the provider verified it too;
+  otherwise `OAUTH_LINK_REQUIRES_VERIFIED_EMAIL` (sign in with the password and
+  verify the email first). Email already linked to a different Google / Apple
+  account: `OAUTH_ACCOUNT_CONFLICT`.
+  """
+  oauthToken: String
+  """
+  `APPLE` only: the name Apple returns to the client on the first authorization.
+  Used only when the account is created. The email always comes from the token.
+  """
+  firstName: String
+  """
+  `APPLE` only. See `firstName`.
+  """
+  lastName: String
+  """
+  Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
+  """
+  captchaToken: String
+}
+
+input UpdateMyProfileInput {
+  name: String
+  """
+  Empty string clears the number (and its verification). Changing a verified
+  number throws `PHONE_CHANGE_REQUIRES_VERIFICATION`: use
+  `sendPhoneVerification` + `verifyPhone` instead. An unverified number can be
+  changed here. Taken by another account: `EMAIL_OR_PHONE_IN_USE`.
+  """
+  contactNumber: String
+  defaultPreferredContactMethod: TaskContactMethod
+  """
+  Worker bio (persisted on the canonical worker document).
+  """
+  bio: String
+  """
+  Date of birth (private). Must meet the minimum worker age.
+  """
+  dateOfBirth: DateTime
+  """
+  Public read URL for the uploaded avatar (see `getProfileAvatarUpload`).
+  """
+  avatarUrl: String
+}
+
+input UpdateMySettingsInput {
+  isProfilePrivate: Boolean
+  marketingEmails: Boolean
+  language: UserLanguage
+}
+
+"""
+Share of jobs in one achievements panel.
+Percents are rounded to one decimal and adjusted so the panel sums to 100.
+"""
+type TaskAchievementCategoryShare {
+  category: String!
+  count: Int!
+  percent: Float!
+}
+
+"""
+Most common area in one achievements panel.
+The label drops a leading street segment when the stored place is comma-separated.
+"""
+type TaskAchievementLocationStat {
+  label: String!
+  count: Int!
+}
+
+"""
+Worker-side My Tasks achievements. Counts and agreed totals use orders where
+this account is the worker and status is `COMPLETED`. Canceled and any
+non-completed status (including a future disputed status) are excluded.
+"""
+type WorkerTaskAchievements {
+  """
+  True when this account has any quote or any order as the worker.
+  False when there is no worker-side history, even if a worker profile exists.
+  """
+  hasActivity: Boolean!
+  """
+  Orders with status `COMPLETED` where this account is the worker.
+  """
+  completedJobsCount: Int!
+  """
+  Category mix of those `COMPLETED` worker orders (snapshot category).
+  """
+  categoryMix: [TaskAchievementCategoryShare!]!
+  """
+  Most common area on those `COMPLETED` worker orders. Null when none have a place label.
+  """
+  mostWorkedLocation: TaskAchievementLocationStat
+  """
+  Distinct tasks with a non-EXPIRED quote created in the current UTC month.
+  Same allowance rule as worker membership. Edits on one task count once.
+  """
+  quotesThisMonth: Int!
+  """
+  Free-tier cap for `quotesThisMonth` (3 per UTC month). Stays 3 when the
+  worker has unlimited quotes; clients should read `hasUnlimitedQuotes`.
+  """
+  freeQuotesPerMonth: Int!
+  """
+  True when the stored membership currently allows unlimited quotes.
+  This is not a money amount and is not added into agreed totals.
+  """
+  hasUnlimitedQuotes: Boolean!
+  """
+  Consecutive UTC weeks (Monday 00:00 start), ending this week, that each
+  contain at least one `COMPLETED` worker order. Zero when this week has none.
+  """
+  streakWeeks: Int!
+  """
+  Accepted quote amounts on `COMPLETED` worker orders, grouped by currency.
+  Off-platform amounts agreed with the customer. Subscription charges are not included.
+  """
+  agreedTotalsOnCompletedJobs: [Price!]!
+}
+
+"""
+Customer-side My Tasks achievements. Completed counts, category mix, location,
+and agreed totals use orders where this account is the customer (host) and
+status is `COMPLETED`. Canceled and any non-completed status are excluded.
+"""
+type CustomerTaskAchievements {
+  """
+  True when this account has posted any task or has any order as the customer.
+  False when there is no customer-side history.
+  """
+  hasActivity: Boolean!
+  """
+  Orders with status `COMPLETED` where this account is the customer.
+  """
+  hostedCompletedCount: Int!
+  """
+  Category mix of those `COMPLETED` hosted orders (snapshot category).
+  """
+  categoryMix: [TaskAchievementCategoryShare!]!
+  """
+  Most common area on those `COMPLETED` hosted orders. Null when none have a place label.
+  """
+  mostUsedLocation: TaskAchievementLocationStat
+  """
+  Quotes received on this account's posted tasks. EXPIRED rows (withdrawn or
+  overwritten) and quotes on canceled tasks are excluded.
+  """
+  quotesReceived: Int!
+  """
+  Accepted quote amounts on `COMPLETED` hosted orders, grouped by currency.
+  Off-platform amounts agreed with the worker. Subscription charges are not included.
+  """
+  agreedTotalsOnCompletedJobs: [Price!]!
+}
+
+"""
+Owner-only My Tasks achievements. `worker` and `customer` are independent.
+"""
+type MyTasksAchievements {
+  worker: WorkerTaskAchievements!
+  customer: CustomerTaskAchievements!
+}
+
+extend type Query {
+  me: User! @auth
+  """
+  Public user profile by id. Anonymous OK.
+
+  Always returns `PublicUser` — never email, phone, settings, orders,
+  messages, or quoted tasks, even when the viewer is that user.
+  Use `me` for the signed-in account.
+
+  Null when the user does not exist, the id is invalid, the account is
+  disabled, or the profile is private (`settings.isProfilePrivate`).
+  """
+  user(id: ID!): PublicUser
+  """
+  Public profile by user id for `/profile/[userId]`. Anonymous OK.
+
+  Null when the user does not exist, the id is invalid, the account is
+  disabled, or the profile is private. See `PublicProfile`.
+  """
+  publicProfile(userId: ID!): PublicProfile
+}
+
+extend type Mutation {
+  register(
+    email: String!
+    password: String!
+    name: String
+    contactNumber: String
+    """
+    Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
+    Required when Turnstile is configured and server policy demands a challenge.
+    """
+    captchaToken: String
+  ): AuthPayload!
+  login(
+    email: String!
+    password: String!
+    method: LoginMethod! = PASSWORD
+    """
+    Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
+    Required when Turnstile is configured and server policy demands a challenge.
+    """
+    captchaToken: String
+  ): AuthPayload!
   loginWithMethod(input: LoginInput!): AuthPayload!
-  """BE-42 @admin — god-mode task update (ignores owner checks)."""
-  adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task!
-  """BE-43 @admin — ops profile / verification updates."""
-  adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User!
-  """BE-43 @admin — disable or re-enable a user if the API ships it."""
-  adminSetUserDisabled(id: ID!, disabled: Boolean!): User!
-  """BE-46 @admin — set report status. Does not require ADMIN_EMAILS."""
-  adminUpdateReportStatus(id: ID!, status: ReportStatus!): Report!
-  """BE-40 env-allowlist path kept for existing tools."""
-  updateReportStatus(id: ID!, status: ReportStatus!): Report!
-  """BE-48 @admin — set product feedback status."""
-  adminUpdateFeedbackStatus(id: ID!, status: FeedbackStatus!): Feedback!
+  forgotPassword(
+    email: String!
+    """
+    Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
+    Required whenever Turnstile is configured for this environment.
+    """
+    captchaToken: String
+  ): ForgotPasswordPayload!
+  resetPassword(token: String!, newPassword: String!): AuthPayload!
   """
-  BE-48 draft reply mutation form (if the API ships it here instead of Query).
-  Does not send email.
+  Complete email verification from the signed link (`/verify-email?token=...`).
+  Returns a fresh session token with `emailVerified: true`. Idempotent when already verified.
+
+  A link for the account's `pendingEmail` completes an email change: `email`
+  becomes the pending address, the old address gets a notice. A link for an
+  address that is neither the email nor the pending email (cancelled or
+  replaced): `EMAIL_MISMATCH`. Address taken meanwhile: `EMAIL_OR_PHONE_IN_USE`.
   """
-  adminFeedbackDraftReply(id: ID!): AdminFeedbackDraftReply!
+  verifyEmail(token: String!): AuthPayload!
+  """
+  Resend the verification email. Goes to `pendingEmail` when an email change is
+  waiting, otherwise to the unverified `email`. Rate-limited (max once per 2 minutes):
+  `RESEND_VERIFICATION_RATE_LIMITED`.
+  """
+  resendVerificationEmail: Boolean! @auth
+  """
+  Start an email change (password accounts only). Stores `pendingEmail`, emails
+  a verify link to it, and notifies the current address. `email` changes only
+  when the link is used (`verifyEmail`). Errors: `EMAIL_CHANGE_NOT_ALLOWED`
+  (Google- or Apple-only account), `INVALID_CREDENTIALS` (behind the login rate limit and
+  lockout), `INVALID_EMAIL`, `EMAIL_UNCHANGED`, `EMAIL_OR_PHONE_IN_USE`,
+  `RESEND_VERIFICATION_RATE_LIMITED`.
+  """
+  requestEmailChange(newEmail: String!, password: String!): Boolean! @auth
+  """
+  Drop a pending email change. Earlier links for it stop working.
+  """
+  cancelEmailChange: Boolean! @auth
+  updateMyProfile(input: UpdateMyProfileInput!): User! @auth
+  updateMySettings(input: UpdateMySettingsInput!): User! @auth
+  """
+  Send a 6-digit SMS code (Twilio Verify) to `phone` and hold it as `pendingPhone`.
+  The saved number and its verification stay live until `verifyPhone`. Works
+  for first-time verification (the saved number) and for changing a verified
+  number. Returns true without sending when `phone` is the already verified
+  number. Errors: `EMAIL_OR_PHONE_IN_USE`, `PHONE_VERIFICATION_RATE_LIMITED`
+  (3 sends per hour per user).
+  """
+  sendPhoneVerification(phone: String!): Boolean! @auth
+  """
+  Submit the SMS code sent to `pendingPhone`. On approval the pending number
+  becomes `profile.contactNumber` with `phoneVerifiedAt` set. Errors:
+  `PHONE_VERIFICATION_NOT_REQUESTED`, `INVALID_OR_EXPIRED_VERIFICATION`,
+  `EMAIL_OR_PHONE_IN_USE` (number taken since the code was sent).
+  """
+  verifyPhone(code: String!): Boolean! @auth
+  """
+  Drop a pending phone change. The saved number is untouched.
+  """
+  cancelPhoneChange: Boolean! @auth
+}
+
+type Location {
+  """
+  Free-text or structured address line when present.
+  """
+  address: String
+  """
+  Latitude in decimal degrees.
+  """
+  lat: Float
+  """
+  Longitude in decimal degrees.
+  """
+  lng: Float
+  """
+  Display or geocoding label (for example from Mapbox).
+  """
+  name: String
+}
+
+input LocationInput {
+  """
+  Free-text or structured address line when present.
+  """
+  address: String
+  """
+  Latitude in decimal degrees.
+  """
+  lat: Float
+  """
+  Longitude in decimal degrees.
+  """
+  lng: Float
+  """
+  Display or geocoding label (for example from Mapbox).
+  """
+  name: String
+}
+
+"""
+How far a worker travels from their base location, plus an optional
+human-readable label (for example "Camden & Islington").
+"""
+type ServiceArea {
+  """
+  Travel radius from the worker's preferred location, in miles.
+  """
+  radiusMiles: Float
+  """
+  Display label for the covered area, e.g. "Camden & Islington (~5 miles)".
+  """
+  label: String
+}
+
+input ServiceAreaInput {
+  """
+  Travel radius in miles. Must be greater than 0 and at most 50.
+  """
+  radiusMiles: Float
+  """
+  Display label for the covered area.
+  """
+  label: String
+}
+
+"""
+Identity verification progress for a worker. `NOT_STARTED` until the worker
+begins identity checks; `PENDING` while checks are in review; `VERIFIED` once
+approved. `worker.isVerified` is derived from this (`VERIFIED` only).
+"""
+enum IdentityVerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+}
+
+"""
+Primary trade / service category chosen during worker setup (`services.skills`).
+Null until setup picks one.
+"""
+enum WorkerPrimaryCategory {
+  HANDYMAN
+  FURNITURE_ASSEMBLY
+  MOUNTING_INSTALLATION
+  PLUMBING
+  ELECTRICAL
+  CARPENTRY
+  PAINTING
+  CLEANING
+  GARDENING
+  REMOVALS
+  DELIVERY_ERRANDS
+  OTHER
+}
+
+"""
+Public reviews of this worker. `count` is how many are unlocked.
+`average` stays null until `count` is at least 3 — no partial average.
+"""
+type WorkerRatingSummary {
+  average: Float
+  count: Int!
+}
+
+"""
+A completed platform job shown on the public worker profile ("Work on
+Slashie"). Public-safe fields only.
+"""
+type WorkerCompletedJob {
+  taskId: ID!
+  title: String!
+  category: String!
+  """
+  Approximate area only (borough/city) — same redaction as public task views.
+  """
+  areaLabel: String
+  completedAt: DateTime!
+  """
+  Stars from the customer's unlocked review of this job. Null until that
+  review is public (both parties submitted, or 14 days after completion)
+  or when the review is hidden.
+  """
+  rating: Float
+}
+
+"""
+How the viewer can contact this worker from the profile page.
+"""
+enum WorkerContactAction {
+  """
+  Contact does not apply (viewing your own profile).
+  """
+  NONE
+  """
+  Viewer is anonymous — sign in first.
+  """
+  SIGN_IN
+  """
+  No existing relationship — contact unlocks after accepting a quote on a task.
+  """
+  ACCEPT_QUOTE_FIRST
+  """
+  Viewer has an active job with this worker — contact via `relatedTaskId`.
+  """
+  OPEN_TASK
+  """
+  This worker has a pending quote on the viewer's open task — see `relatedQuoteId`.
+  """
+  OPEN_QUOTE
+}
+
+"""
+Viewer-specific worker profile context (`worker.viewer`). Null for anonymous
+viewers; drives the Save / Leave a review / Contact states on the profile page.
+"""
+type WorkerProfileViewer {
+  isSaved: Boolean!
+  """
+  True when the viewer has a completed (closed) job with this worker.
+  """
+  canLeaveReview: Boolean!
+  contactAction: WorkerContactAction!
+  relatedTaskId: ID
+  relatedQuoteId: ID
+}
+
+"""
+Join row recording that a user saved a worker. Storage-only (not queryable
+directly); surfaced through `worker.viewer.isSaved`.
+"""
+type SavedWorker @entity {
+  id: ID! @id
+  userId: ID! @link
+  workerId: ID! @link
+  createdAt: DateTime! @column
+}
+
+type worker
+  @entity(
+    additionalFields: [
+      { path: "stripeCustomerId", type: "string | null" }
+      { path: "subscriptionId", type: "string | null" }
+      { path: "subscriptionStatus", type: "string | null" }
+      { path: "trialEndsAt", type: "Date | null" }
+      { path: "currentPeriodEnd", type: "Date | null" }
+      { path: "cancelAtPeriodEnd", type: "boolean" }
+      { path: "canceledAt", type: "Date | null" }
+      { path: "setupCompletedSubSteps", type: "string[]" }
+      # Set when setup review is submitted; null for drafts. Directory visibility.
+      { path: "setupCompletedAt", type: "Date | null" }
+      { path: "skills", type: "string[]" }
+      { path: "primaryCategory", type: "string | null" }
+      { path: "qualifications", type: "string[]" }
+      { path: "travelRadiusMiles", type: "number | null" }
+      { path: "serviceAreaLabel", type: "string | null" }
+      { path: "portfolioUrls", type: "string[]" }
+      { path: "identityVerificationStatus", type: "string | null" }
+    ]
+  )
+{
+  id: ID! @id
+  userId: ID! @link
+  """
+  Worker's legal name.
+  """
+  legalName: String @column
+  bio: String @column
+  tagline: String @column
+  locationAddress: String @column
+  locationLat: Float @column
+  locationLng: Float @column
+  yearsExperience: Int @column
+  """
+  Convenience flag derived from `identityVerification` — true only when
+  identity verification is `VERIFIED`.
+  """
+  isVerified: Boolean!
+  """
+  Identity verification progress (Trust & verification card). Distinguishes
+  "not started" from "in review" so the FE can render each state.
+  """
+  identityVerification: IdentityVerificationStatus!
+  """
+  Primary trade chosen at setup (`services.skills`). Null until chosen.
+  """
+  primaryCategory: WorkerPrimaryCategory
+  """
+  Additional free-text skills/tags (setup step `services.skills`). Distinct
+  from `primaryCategory`.
+  """
+  skills: [String!]!
+  """
+  Qualifications and certifications (setup step `services.experience`), e.g.
+  "City & Guilds", "NICEIC", "Gas Safe". Public labels only — no documents.
+  """
+  qualifications: [String!]!
+  """
+  How far the worker is willing to travel from their base location, in miles.
+  """
+  travelRadiusMiles: Float
+  """
+  Optional portfolio image URLs (setup step `verify.portfolio`).
+  """
+  portfolioUrls: [String!]!
+  """
+  Multi-step onboarding progress. Owner-only (`me.worker`); null for other viewers.
+  """
+  setupProgress: WorkerSetupProgress
+
+  profile: Profile!
+  user: User!
+  """
+  Approximate base location shown on maps and the profile. `lat`/`lng`/`name`
+  are public; `address` is only returned to the worker themself.
+  """
+  preferredLocation: Location!
+  """
+  How far the worker travels from their preferred location. Drives geo search
+  intersection (`Query.workers` `filter.lat/lng/radiusMiles` or `filter.bounds`).
+  """
+  serviceArea: ServiceArea!
+  """
+  When the worker joined Slashie (linked user's registration date).
+  """
+  memberSince: DateTime
+  """
+  Number of quotes this worker has sent (withdrawn quotes excluded). Public
+  "At a glance" stat.
+  """
+  quotesSentCount: Int!
+  """
+  Public trust signal from the linked user account (Trust & verification card).
+  True only when the user's phone number is actually verified via Twilio
+  Verify approval (`phoneVerified` + `phoneVerifiedAt` + a saved phone number).
+  """
+  phoneVerified: Boolean!
+  """
+  Public trust signal from the linked user account (Trust & verification card).
+  Mirrors the user's `emailVerified` flag. Boolean only — never exposes the
+  email address itself.
+  """
+  emailVerified: Boolean!
+  ratingSummary: WorkerRatingSummary!
+  """
+  Publicly unlocked reviews of this worker, newest first. Hidden reviews are
+  omitted. This list is not sortable by rating.
+  """
+  reviews: [Review!]!
+  """
+  Public display label for the service area, e.g. "Camden & Islington (~5 miles)".
+  Uses the stored service-area label, falling back to the area display name plus
+  travel radius. Never a street address.
+  """
+  serviceAreaLabel: String
+  """
+  Completed (customer-confirmed) platform jobs, newest first. Empty when none.
+  """
+  completedJobs: [WorkerCompletedJob!]!
+  """
+  Viewer-specific context (save / review / contact states). Null when anonymous.
+  """
+  viewer: WorkerProfileViewer
+  """
+  Platform subscription plan and quote usage. Stripe-verified when the viewer is the worker.
+  """
+  membership: WorkerMembership!
+  """
+  Tasks this worker has quoted on (viewer must be the worker).
+  """
+  quotedTasks(filter: TaskFilter, sort: TaskSort): [Task!]!
+  """
+  Reference earnings summary (not payouts). Viewer must be the worker.
+  """
+  earnings: WorkerEarnings!
+}
+
+type WorkerEarnings {
+  """
+  Sum of agreed prices on the worker's non-COMPLETED orders (C2C reference only, not payouts).
+  """
+  pending: Price!
+}
+
+type WorkerSetupProgress {
+  """
+  Active sub-step id, e.g. `profile.details`.
+  """
+  currentSubStep: String!
+  """
+  Sub-step ids the worker has completed via `saveWorkerSetupStep`.
+  """
+  completedSubSteps: [String!]!
+  """
+  True when setup is finished (`review.submit` saved successfully).
+  """
+  isComplete: Boolean!
+}
+
+input SaveWorkerSetupStepInput {
+  """
+  Sub-step being saved, e.g. `profile.details`, `services.skills`, `review.submit`.
+  """
+  subStep: String!
+  """
+  Full legal/display name. Alternative to `firstName` + `lastName` (`profile.details`).
+  """
+  legalName: String
+  firstName: String
+  lastName: String
+  """
+  Private DOB on the user (`profile.details`).
+  """
+  dateOfBirth: DateTime
+  """
+  Profile avatar read URL (`profile.photo`; also use `updateMyProfile` if preferred).
+  """
+  avatarUrl: String
+  tagline: String
+  bio: String
+  yearsExperience: Int
+  location: LocationInput
+  """
+  Primary trade (`services.skills`). Required when saving that step.
+  """
+  primaryCategory: WorkerPrimaryCategory
+  """
+  Additional skills/tags (`services.skills`).
+  """
+  skills: [String!]
+  """
+  Qualifications / certifications (`services.experience`). Max 10 items,
+  each 2–40 characters after trim; duplicates are dropped.
+  """
+  qualifications: [String!]
+  """
+  Travel radius in miles (`area.travel`).
+  """
+  travelRadiusMiles: Float
+  """
+  Service area radius and label (`area.travel`). `radiusMiles` here takes
+  precedence over the flat `travelRadiusMiles` when both are supplied.
+  """
+  serviceArea: ServiceAreaInput
+  """
+  Portfolio URLs (`verify.portfolio`).
+  """
+  portfolioUrls: [String!]
+}
+
+input ProRegistrationInput {
+  """
+  Worker's legal name. Persisted on the worker and as the user's canonical profile name.
+  """
+  legalName: String!
+  bio: String
+  tagline: String
+  location: LocationInput!
+  """
+  Optional service area (travel radius + label) captured at registration.
+  """
+  serviceArea: ServiceAreaInput
+  yearsExperience: Int
+  """
+  Date of birth (private). Persisted on the user; must meet the minimum worker age.
+  """
+  dateOfBirth: DateTime
+}
+
+"""
+Map viewport for geo filtering: south-west and north-east corners in decimal degrees.
+"""
+input GeoBoundsInput {
+  swLat: Float!
+  swLng: Float!
+  neLat: Float!
+  neLng: Float!
+}
+
+"""
+Filter constraints for worker directory search (`Query.workers`).
+`search` matches worker bio/tagline/legal name and user profile name plus location label.
+Geo filtering matches workers whose service area (preferred location + travel radius)
+intersects the search area — either `lat`/`lng`/`radiusMiles` (point + radius; default
+radius 25 miles, capped at 50) or `bounds` (map viewport). `bounds` wins when both are
+set. Workers with no location set are excluded from geo-filtered results only.
+`primaryCategory` exact-matches the worker's primary trade.
+`minRating` is accepted and ignored. Public rating filters are not offered.
+"""
+input WorkerFilter {
+  """
+  Case-insensitive partial match on profile name, legal name, tagline, bio, and location label.
+  """
+  search: String
+  """
+  Case-insensitive partial match on the worker's location label (area/city).
+  """
+  location: String
+  """
+  When true, only workers whose identity verification is `VERIFIED` are returned.
+  """
+  verifiedOnly: Boolean
+  """
+  Map/search center latitude for geo filtering and distance sort.
+  """
+  lat: Float
+  """
+  Map/search center longitude for geo filtering and distance sort.
+  """
+  lng: Float
+  """
+  Search radius in miles from the center. Defaults to 25 when `lat` and `lng` are set.
+  """
+  radiusMiles: Float
+  """
+  Map viewport bounding box. Takes precedence over `lat`/`lng`/`radiusMiles`.
+  """
+  bounds: GeoBoundsInput
+  """
+  Ignored. Slashie does not filter the directory by rating.
+  """
+  minRating: Float
+  """
+  Exact match on the worker's primary trade.
+  """
+  primaryCategory: WorkerPrimaryCategory
+}
+
+"""
+Sort order for `Query.workers`. Supplied as a sibling argument to `filter`.
+Default when omitted: `NAME` `ASC`.
+"""
+input WorkerSort {
+  field: WorkerSortField!
+  direction: SortDirection!
+}
+
+enum WorkerSortField {
+  """
+  Sort by distance from `filter.lat` / `filter.lng` (or the centre of `filter.bounds`).
+  Requires a geo filter; otherwise falls back to name order.
+  """
+  DISTANCE
+  """
+  Accepted and ignored. Falls back to name order. No public sort-by-rating.
+  """
+  RATING
+  """
+  Sort alphabetically by display name (legal name, then linked user profile name).
+  """
+  NAME
+}
+
+extend type Query {
+  """
+  Public worker profile by worker id. Null when not found, or when the profile
+  is a draft (setup incomplete) and the viewer is not the worker themself.
+  """
+  worker(id: ID!): worker
+  """
+  Discover registered workers for the /workers directory. Supports text search, verification,
+  and optional geo radius. Nested `user` uses the public shell unless the JWT subject is that worker.
+  """
+  workers(filter: WorkerFilter, sort: WorkerSort): [worker!]!
+}
+
+extend type Mutation {
+  """
+  Incremental worker onboarding save. Upserts a draft worker row and merges `setupProgress`.
+  Each sub-step validates its fields before marking complete.
+  Workers who have already completed setup can replay sub-steps to edit their
+  profile: the data is validated and saved, but setup progress and directory
+  visibility are untouched.
+  """
+  saveWorkerSetupStep(input: SaveWorkerSetupStepInput!): worker! @auth
+  registerAsPro(input: ProRegistrationInput!): worker!
+  """
+  Save this worker to the viewer's list. Idempotent; cannot save yourself.
+  """
+  saveWorker(workerId: ID!): worker! @auth
+  """
+  Remove this worker from the viewer's list. Idempotent.
+  """
+  unsaveWorker(workerId: ID!): worker! @auth
 }

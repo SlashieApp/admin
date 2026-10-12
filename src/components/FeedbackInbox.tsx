@@ -15,13 +15,11 @@ import {
   feedbackMailto,
   feedbackPath,
   feedbackPreview,
-  feedbackPageLocalNotice,
   FEEDBACK_CATEGORIES,
   FEEDBACK_STATUSES,
-  mergeFeedbackRow,
   parseFeedbackListFilters,
   ratingLabel,
-  refineFeedbacks,
+  sortFeedbacks,
   submitterHref,
   submitterLabel,
   type FeedbackDraftReply,
@@ -54,7 +52,6 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
   const [cursorStack, setCursorStack] = useState<string[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [banner, setBanner] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const reduceMotion = usePrefersReducedMotion()
@@ -64,7 +61,6 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
     async function load() {
       setBusy(true)
       setError(null)
-      setBanner(null)
       try {
         const [list, counts] = await Promise.all([
           listAdminFeedbacks({
@@ -77,8 +73,7 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
         ])
         if (cancelled) return
         setRows(list.items)
-        setNextCursor(list.nextCursor)
-        setBanner(list.banner)
+        setNextCursor(list.nextCursor ?? null)
         setSummary(counts)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
@@ -104,9 +99,7 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
     try {
       const updated = await updateAdminFeedbackStatus(id, next)
       setRows((current) =>
-        current.map((row) =>
-          row.id === id ? mergeFeedbackRow(row, updated) : row,
-        ),
+        current.map((row) => (row.id === id ? updated : row)),
       )
       setSummary((current) =>
         adjustFeedbackSummary(
@@ -122,13 +115,10 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
     }
   }
 
-  const visible = refineFeedbacks(rows, filters)
+  const visible = sortFeedbacks(rows, filters)
   const selected = filters.id
-    ? (visible.find((row) => row.id === filters.id) ??
-      rows.find((row) => row.id === filters.id) ??
-      null)
+    ? (rows.find((row) => row.id === filters.id) ?? null)
     : null
-  const localNotice = feedbackPageLocalNotice(filters)
 
   useEffect(() => {
     if (!filters.id) return
@@ -295,62 +285,8 @@ function FeedbackPanel({ filters }: { filters: FeedbackListFilters }) {
             ))}
           </select>
         </label>
-        <label className="field">
-          Email
-          <input
-            className="input"
-            name="email"
-            defaultValue={filters.email}
-            placeholder="Contains…"
-          />
-        </label>
-        <label className="field">
-          Rating
-          <select
-            className="input"
-            name="rating"
-            defaultValue={filters.rating ?? ''}
-          >
-            <option value="">Any</option>
-            {[1, 2, 3, 4, 5].map((value) => (
-              <option key={value} value={value}>
-                {value}/5
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field field-wide">
-          Free text
-          <input
-            className="input search-input"
-            name="q"
-            defaultValue={filters.q}
-            placeholder="Message, name, or page"
-            type="search"
-          />
-        </label>
-        <label className="field">
-          From
-          <input
-            className="input"
-            name="from"
-            type="date"
-            defaultValue={filters.from}
-          />
-        </label>
-        <label className="field">
-          To
-          <input
-            className="input"
-            name="to"
-            type="date"
-            defaultValue={filters.to}
-          />
-        </label>
       </FilterToolbar>
 
-      {banner ? <p className="banner banner-warn">{banner}</p> : null}
-      {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
       {updateError ? <p className="banner banner-error">{updateError}</p> : null}
 

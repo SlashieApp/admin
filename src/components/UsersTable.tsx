@@ -10,25 +10,21 @@ import { TablePager } from '@/components/TablePager'
 import { AdminUsers } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatWhen } from '@/lib/dossier'
-import {
-  graphqlErrorMessage,
-  isMissingAdminFieldError,
-} from '@/lib/graphqlErrors'
+import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import { nextSort } from '@/lib/listParams'
 import { isWorkerUser } from '@/lib/userInput'
 import {
   parseUserListFilters,
-  refineUsers,
+  sortUsers,
   toUserListQueryVariables,
   userFiltersFromForm,
   userListPath,
-  userPageLocalNotice,
   type UserListFilters,
   type UserListRow,
 } from '@/lib/userList'
 import type { AdminUsersQuery } from '@codegen/schema'
 
-type UserHit = AdminUsersQuery['adminUsers'][number]
+type UserHit = AdminUsersQuery['adminUsers']['items'][number]
 
 export function UsersTable() {
   const params = useSearchParams()
@@ -37,6 +33,8 @@ export function UsersTable() {
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<UserHit[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [cursorStack, setCursorStack] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -44,9 +42,14 @@ export function UsersTable() {
       setBusy(true)
       setError(null)
       try {
-        const result = await listUsers(filters)
+        const result = await apolloClient.query<AdminUsersQuery>({
+          query: AdminUsers,
+          variables: toUserListQueryVariables(filters),
+          fetchPolicy: 'network-only',
+        })
         if (cancelled) return
-        setRows(result)
+        setRows(result.data?.adminUsers.items ?? [])
+        setNextCursor(result.data?.adminUsers.nextCursor ?? null)
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -59,13 +62,13 @@ export function UsersTable() {
     }
   }, [filters])
 
-  function go(next: Partial<UserListFilters>) {
-    router.push(userListPath({ ...filters, ...next }))
+  function go(next: Partial<UserListFilters>, keepAfter = false) {
+    const merged = { ...filters, ...next }
+    if (!keepAfter && next.after === undefined) merged.after = ''
+    router.push(userListPath(merged))
   }
 
-  const visible = refineUsers(rows, filters)
-  const localNotice = userPageLocalNotice(filters)
-  const truncated = !busy && rows.length >= filters.first
+  const visible = sortUsers(rows, filters)
 
   const columns: DataColumn<UserHit>[] = [
     {
@@ -119,8 +122,7 @@ export function UsersTable() {
       <div className="page-intro">
         <h1>Users</h1>
         <p className="muted">
-          Search marketplace users by email, name, or id. Disabled, worker, and
-          created-date filters refine the current <code>adminUsers</code> page.
+          Search marketplace users and workers by email, name, or id.
         </p>
       </div>
 
@@ -129,9 +131,13 @@ export function UsersTable() {
         busy={busy}
         onSubmit={(event) => {
           event.preventDefault()
+          setCursorStack([])
           go(userFiltersFromForm(new FormData(event.currentTarget), filters))
         }}
-        onClear={() => router.push('/users')}
+        onClear={() => {
+          setCursorStack([])
+          router.push('/users')
+        }}
       >
         <label className="field field-wide">
           Search
@@ -143,24 +149,6 @@ export function UsersTable() {
             type="search"
             autoComplete="off"
             spellCheck={false}
-          />
-        </label>
-        <label className="field">
-          Email
-          <input
-            className="input"
-            name="email"
-            defaultValue={filters.email}
-            placeholder="Contains…"
-          />
-        </label>
-        <label className="field">
-          Name
-          <input
-            className="input"
-            name="name"
-            defaultValue={filters.name}
-            placeholder="Contains…"
           />
         </label>
         <label className="field">
@@ -199,20 +187,6 @@ export function UsersTable() {
         </label>
       </FilterToolbar>
 
-      {localNotice ? <p className="banner banner-warn">{localNotice}</p> : null}
-      {truncated ? (
-        <p className="banner banner-warn">
-          Showing the first {filters.first} matching server rows.{' '}
-          <code>adminUsers</code> has no cursor yet —{' '}
-          <a
-            className="inline-link"
-            href="https://linear.app/slashie/issue/BE-50/admin-api-cursor-pagination-richer-filters-for-tasks-users-feedback"
-          >
-            BE-50
-          </a>
-          .
-        </p>
-      ) : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
 
       <DataTable
@@ -221,7 +195,7 @@ export function UsersTable() {
         rowKey={(user) => user.id}
         sort={filters.sort}
         dir={filters.dir}
-        onSort={(key) => go(nextSort(filters.sort, filters.dir, key))}
+        onSort={(key) => go(nextSort(filters.sort, filters.dir, key), true)}
         loading={busy}
         empty="No users for this filter."
         renderCard={(user) => <UserCard user={user} />}
@@ -230,8 +204,26 @@ export function UsersTable() {
             shown={visible.length}
             fetched={rows.length}
             pageSize={filters.first}
-            onPageSize={(first) => go({ first })}
-            note={truncated ? 'end of this request' : null}
+            hasNext={Boolean(nextCursor)}
+            hasPrev={Boolean(filters.after)}
+            onPageSize={(first) => {
+              setCursorStack([])
+              go({ first })
+            }}
+            onNext={() => {
+              if (!nextCursor) return
+              setCursorStack((stack) => [...stack, filters.after])
+              go({ after: nextCursor }, true)
+            }}
+            onPrev={() => {
+              const prev = cursorStack.at(-1) ?? ''
+              setCursorStack((stack) => stack.slice(0, -1))
+              go({ after: prev }, true)
+            }}
+            onFirst={() => {
+              setCursorStack([])
+              go({})
+            }}
           />
         }
       />
@@ -258,20 +250,4 @@ function UserCard({ user }: { user: UserListRow }) {
       </p>
     </>
   )
-}
-
-async function listUsers(filters: UserListFilters): Promise<UserHit[]> {
-  try {
-    const result = await apolloClient.query<AdminUsersQuery>({
-      query: AdminUsers,
-      variables: toUserListQueryVariables(filters),
-      fetchPolicy: 'network-only',
-    })
-    return result.data?.adminUsers ?? []
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-    throw new Error(
-      'adminUsers is not on this Apollo yet (BE-43). Point NEXT_PUBLIC_GRAPHQL_URL at an API that has the @admin user search.',
-    )
-  }
 }

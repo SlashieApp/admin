@@ -63,57 +63,37 @@ describe('linkedWorkersFromDossier', () => {
 })
 
 describe('activityFromDossier', () => {
-  it('merges notifications and timeline, newest first', () => {
-    const rows = activityFromDossier({
-      activity: [
-        {
-          source: 'NOTIFICATION',
-          type: 'QUOTE_RECEIVED',
-          title: 'New quote',
-          body: '£80',
-          createdAt: '2026-09-14T12:00:00.000Z',
-        },
-      ],
-      timeline: [
-        {
-          type: 'TASK_CREATED',
-          timestamp: '2026-09-14T10:00:00.000Z',
-          actor: { id: 'u1', email: 'a@x.com' },
-        },
-        {
-          type: 'TASK_UPDATED',
-          timestamp: '2026-09-14T13:00:00.000Z',
-          actor: { id: 'u1', email: 'a@x.com' },
-        },
-      ],
-    })
-
-    expect(rows.map((row) => row.title)).toEqual([
-      'TASK_UPDATED',
-      'New quote',
-      'TASK_CREATED',
+  it('maps FLASH and TIMELINE rows newest first', () => {
+    const rows = activityFromDossier([
+      {
+        source: 'FLASH',
+        type: 'QUOTE_RECEIVED',
+        title: 'New quote',
+        body: '£80',
+        visibleToUserIds: ['u1'],
+        createdAt: '2026-09-14T12:00:00.000Z',
+      },
+      {
+        source: 'TIMELINE',
+        type: 'TASK_UPDATED',
+        actorUserId: 'u1',
+        createdAt: '2026-09-14T13:00:00.000Z',
+      },
     ])
-    expect(rows[1]?.kind).toBe('notification')
-  })
-
-  it('maps AdminTaskActivity TIMELINE source without nested actor', () => {
-    const rows = activityFromDossier({
-      activity: [
-        {
-          source: 'TIMELINE',
-          type: 'TASK_UPDATED',
-          actorUserId: 'u1',
-          createdAt: '2026-09-14T13:00:00.000Z',
-        },
-      ],
-    })
     expect(rows).toEqual([
       {
-        id: 'timeline-TASK_UPDATED-2026-09-14T13:00:00.000Z-0',
+        id: 'timeline-TASK_UPDATED-2026-09-14T13:00:00.000Z-1',
         title: 'TASK_UPDATED',
         body: 'Actor: u1',
         at: '2026-09-14T13:00:00.000Z',
         kind: 'timeline',
+      },
+      {
+        id: 'flash-QUOTE_RECEIVED-2026-09-14T12:00:00.000Z-0',
+        title: 'New quote',
+        body: '£80 · Visible to: u1',
+        at: '2026-09-14T12:00:00.000Z',
+        kind: 'flash',
       },
     ])
   })

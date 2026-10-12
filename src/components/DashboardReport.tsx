@@ -43,8 +43,8 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
       <div className="page-intro">
         <h1>Dashboard</h1>
         <p className="muted">
-          Weekly / monthly ops report. Mongo counts are source of truth when
-          BE-44 <code>adminOpsSummary</code> is deployed. PostHog is
+          Weekly / monthly ops report. Mongo counts from{' '}
+          <code>adminOpsSummary</code> are the source of truth. PostHog is
           complementary product analytics.
         </p>
       </div>
@@ -86,7 +86,6 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
             <OptionalCount label="Quotes declined" count={ops.quotesDeclined} />
             <OptionalCount label="Orders opened" count={ops.ordersOpened} />
             <OptionalCount label="Jobs completed" count={ops.jobsCompleted} />
-            <OptionalCount label="Jobs confirmed" count={ops.jobsConfirmed} />
             <OptionalCount
               label="Reports submitted"
               count={ops.reportsSubmitted}

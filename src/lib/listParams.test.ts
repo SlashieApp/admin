@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   compareValues,
-  inDateRange,
-  includesNormalized,
   nextSort,
-  pageLocalNotice,
   parseDateInput,
   parseOptionalNumber,
   parsePageSize,
@@ -54,21 +51,6 @@ describe('parseOptionalNumber / parseDateInput / parseTriState', () => {
   })
 })
 
-describe('inDateRange', () => {
-  it('includes the start and end calendar days', () => {
-    expect(
-      inDateRange('2026-09-18T12:00:00.000Z', '2026-09-18', '2026-09-18'),
-    ).toBe(true)
-    expect(
-      inDateRange('2026-09-17T23:00:00.000Z', '2026-09-18', ''),
-    ).toBe(false)
-    expect(inDateRange('2026-09-19T00:00:00.000Z', '', '2026-09-18')).toBe(
-      false,
-    )
-    expect(inDateRange('2026-09-18', '2026-09-18', '2026-09-20')).toBe(true)
-  })
-})
-
 describe('sortRows', () => {
   it('sorts numbers and strings', () => {
     const rows = [
@@ -89,13 +71,6 @@ describe('sortRows', () => {
 })
 
 describe('helpers', () => {
-  it('does case-insensitive includes and builds a page-local notice', () => {
-    expect(includesNormalized('Sam Lee', 'lee')).toBe(true)
-    expect(includesNormalized('Sam Lee', 'pat')).toBe(false)
-    expect(pageLocalNotice([])).toBeNull()
-    expect(pageLocalNotice(['Poster'])).toContain('Poster')
-  })
-
   it('compares nulls last', () => {
     expect(compareValues(null, 1, 'asc')).toBe(1)
     expect(compareValues(1, null, 'asc')).toBe(-1)

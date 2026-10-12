@@ -1,17 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  filterReportsByTargetType,
-  mergeReportRow,
   parseReportListFilters,
   parseReportStatusFilter,
   parseReportTargetTypeFilter,
-  refineReports,
   reporterHref,
   reporterLabel,
-  reportFromApi,
   reportsPath,
   reportTargetHref,
+  sortReports,
   sortReportsOpenFirst,
   taskTitle,
   toAdminReportsVariables,
@@ -48,9 +45,11 @@ describe('parseReportTargetTypeFilter', () => {
     expect(parseReportTargetTypeFilter('nope')).toBe('TASK')
   })
 
-  it('accepts all types and worker/user', () => {
+  it('accepts all types, including review and message', () => {
     expect(parseReportTargetTypeFilter('ALL')).toBe('ALL')
     expect(parseReportTargetTypeFilter('WORKER')).toBe('WORKER')
+    expect(parseReportTargetTypeFilter('REVIEW')).toBe('REVIEW')
+    expect(parseReportTargetTypeFilter('MESSAGE')).toBe('MESSAGE')
   })
 })
 
@@ -106,19 +105,6 @@ describe('sortReportsOpenFirst', () => {
   })
 })
 
-describe('filterReportsByTargetType', () => {
-  it('keeps TASK rows for the default inbox fallback', () => {
-    const rows = filterReportsByTargetType(
-      [
-        report({ id: 't', targetType: 'TASK' }),
-        report({ id: 'w', targetType: 'WORKER' }),
-      ],
-      'TASK',
-    )
-    expect(rows.map((row) => row.id)).toEqual(['t'])
-  })
-})
-
 describe('report links and labels', () => {
   it('links tasks and users inside the admin panel', () => {
     expect(
@@ -129,6 +115,9 @@ describe('report links and labels', () => {
     ).toBe('/users/u9')
     expect(
       reportTargetHref(report({ id: '3', targetType: 'WORKER', targetId: 'w1' })),
+    ).toBeNull()
+    expect(
+      reportTargetHref(report({ id: '4', targetType: 'MESSAGE', targetId: 'm1' })),
     ).toBeNull()
   })
 
@@ -165,67 +154,18 @@ describe('report links and labels', () => {
     )
   })
 
-  it('uses BE-46 targetLabel when present', () => {
+  it('uses targetLabel when present', () => {
     expect(
       taskTitle(
         report({ id: '1', targetType: 'TASK', targetLabel: 'Leaky tap' }),
       ),
     ).toBe('Leaky tap')
     expect(taskTitle(report({ id: '2', targetId: 'zzz' }))).toBe('Task zzz')
-  })
-})
-
-describe('reportFromApi', () => {
-  it('maps live targetLabel and reporterEmail onto the inbox row', () => {
-    const row = reportFromApi({
-      id: 'r1',
-      targetId: 't9',
-      targetType: 'TASK',
-      reason: 'SPAM',
-      status: 'OPEN',
-      createdAt: '2026-09-14T12:00:00.000Z',
-      reporterUserId: 'u1',
-      targetLabel: 'Garden fence',
-      reporterEmail: 'pat@x.com',
-    })
-    expect(row.targetLabel).toBe('Garden fence')
-    expect(row.reporterEmail).toBe('pat@x.com')
-    expect(taskTitle(row)).toBe('Garden fence')
-    expect(reporterLabel(row)).toBe('pat@x.com')
-  })
-
-  it('maps the pre-BE-46 targetTitle alias onto targetLabel', () => {
-    const row = reportFromApi({
-      id: 'r2',
-      targetId: 't2',
-      targetType: 'TASK',
-      reason: 'SCAM',
-      status: 'OPEN',
-      createdAt: '2026-09-14T12:00:00.000Z',
-      reporterUserId: 'u1',
-      targetTitle: 'Old title field',
-    })
-    expect(row.targetLabel).toBe('Old title field')
-    expect(taskTitle(row)).toBe('Old title field')
-  })
-})
-
-describe('mergeReportRow', () => {
-  it('keeps task title and reporter after a core status update', () => {
-    const current = report({
-      id: 'r1',
-      targetLabel: 'Leaky tap',
-      reporterEmail: 'sam@x.com',
-      reporter: { id: 'u3', email: 'sam@x.com', profile: { name: 'Sam' } },
-    })
-    const merged = mergeReportRow(
-      current,
-      report({ id: 'r1', status: 'REVIEWED' }),
-    )
-    expect(merged.status).toBe('REVIEWED')
-    expect(merged.targetLabel).toBe('Leaky tap')
-    expect(merged.reporterEmail).toBe('sam@x.com')
-    expect(merged.reporter?.profile?.name).toBe('Sam')
+    expect(
+      taskTitle(
+        report({ id: '3', targetType: 'MESSAGE', targetLabel: 'send me cash' }),
+      ),
+    ).toBe('send me cash')
   })
 })
 
@@ -236,45 +176,23 @@ describe('reportsPath', () => {
     expect(reportsPath({ status: 'OPEN', targetType: 'ALL' })).toBe(
       '/reports?status=OPEN&targetType=ALL',
     )
-    expect(
-      reportsPath({
-        status: 'OPEN',
-        reason: 'SPAM',
-        reporter: 'sam',
-        after: 'c2',
-      }),
-    ).toBe('/reports?status=OPEN&reason=SPAM&reporter=sam&after=c2')
+    expect(reportsPath({ status: 'OPEN', after: 'c2' })).toBe(
+      '/reports?status=OPEN&after=c2',
+    )
   })
 })
 
-describe('refineReports', () => {
-  it('filters reason, reporter, and date on the current page', () => {
+describe('sortReports', () => {
+  it('sorts the fetched page by column', () => {
     const rows = [
-      report({
-        id: '1',
-        reason: 'SPAM',
-        reporterEmail: 'sam@x.com',
-        reporterUserId: 'u1',
-      }),
-      report({
-        id: '2',
-        reason: 'SCAM',
-        reporterEmail: 'lee@x.com',
-        reporterUserId: 'u2',
-        createdAt: '2026-08-01T00:00:00.000Z',
-      }),
+      report({ id: '1', reason: 'SPAM' }),
+      report({ id: '2', reason: 'HARASSMENT' }),
     ]
     expect(
-      refineReports(
+      sortReports(
         rows,
-        parseReportListFilters(new URLSearchParams('reason=SPAM&reporter=sam')),
+        parseReportListFilters(new URLSearchParams('sort=reason&dir=asc')),
       ).map((row) => row.id),
-    ).toEqual(['1'])
-    expect(
-      refineReports(
-        rows,
-        parseReportListFilters(new URLSearchParams('from=2026-09-01')),
-      ).map((row) => row.id),
-    ).toEqual(['1'])
+    ).toEqual(['2', '1'])
   })
 })

@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   parseUserListFilters,
-  refineUsers,
+  sortUsers,
   toUserListQueryVariables,
   userListPath,
-  userPageLocalFields,
-  userServerSearch,
   type UserListRow,
 } from './userList'
 
@@ -26,62 +24,43 @@ function user(
   }
 }
 
-describe('parseUserListFilters / userServerSearch', () => {
-  it('prefers q for the server search, then email, then name', () => {
-    const filters = parseUserListFilters(
-      params('q=pat&email=pat@x.com&name=Lee&disabled=1&worker=0&from=2026-09-01'),
-    )
-    expect(filters.disabled).toBe('yes')
-    expect(filters.worker).toBe('no')
-    expect(userServerSearch(filters)).toBe('pat')
-    expect(userServerSearch(parseUserListFilters(params('email=pat@x.com')))).toBe(
-      'pat@x.com',
-    )
-  })
-})
-
 describe('toUserListQueryVariables', () => {
-  it('maps the composed search onto adminUsers', () => {
+  it('sends search, disabled, worker, created bounds, and cursor to adminUsers', () => {
     expect(
-      toUserListQueryVariables(parseUserListFilters(params('email=pat@x.com'))),
-    ).toEqual({ first: 25, search: 'pat@x.com' })
+      toUserListQueryVariables(
+        parseUserListFilters(
+          params('q=pat&disabled=1&worker=0&from=2026-09-01&to=2026-09-30&after=u9'),
+        ),
+      ),
+    ).toEqual({
+      first: 25,
+      search: 'pat',
+      disabled: true,
+      isWorker: false,
+      createdAfter: '2026-09-01T00:00:00.000Z',
+      createdBefore: '2026-09-30T23:59:59.999Z',
+      after: 'u9',
+    })
+  })
+
+  it('sends only page size with no filters', () => {
+    expect(toUserListQueryVariables(parseUserListFilters(params('')))).toEqual({
+      first: 25,
+    })
   })
 })
 
-describe('refineUsers', () => {
-  const rows = [
-    user({ id: '1', email: 'pat@x.com' }),
-    user({
-      id: '2',
-      email: 'lee@x.com',
-      disabled: true,
-      profile: { name: 'Lee' },
-      worker: { id: 'w1' },
-      createdAt: '2026-08-01T00:00:00.000Z',
-    }),
-  ]
-
-  it('filters disabled, worker, email, and created date on the current page', () => {
+describe('sortUsers', () => {
+  it('sorts the fetched page', () => {
+    const rows = [
+      user({ id: '1', email: 'pat@x.com' }),
+      user({ id: '2', email: 'lee@x.com', profile: { name: 'Lee' } }),
+    ]
     expect(
-      refineUsers(rows, parseUserListFilters(params('disabled=1'))).map(
+      sortUsers(rows, parseUserListFilters(params('sort=name&dir=asc'))).map(
         (row) => row.id,
       ),
-    ).toEqual(['2'])
-    expect(
-      refineUsers(rows, parseUserListFilters(params('worker=1'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['2'])
-    expect(
-      refineUsers(rows, parseUserListFilters(params('email=pat'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['1'])
-    expect(
-      refineUsers(rows, parseUserListFilters(params('from=2026-09-01'))).map(
-        (row) => row.id,
-      ),
-    ).toEqual(['1'])
+    ).toEqual(['2', '1'])
   })
 })
 
@@ -91,16 +70,8 @@ describe('userListPath', () => {
     expect(userListPath({ q: 'pat', disabled: 'yes' })).toBe(
       '/users?q=pat&disabled=1',
     )
-  })
-})
-
-describe('userPageLocalFields', () => {
-  it('marks disabled, worker, and date as page-local', () => {
-    expect(userPageLocalFields(parseUserListFilters(params('q=pat')))).toEqual(
-      [],
+    expect(userListPath({ worker: 'yes', after: 'u9' })).toBe(
+      '/users?worker=1&after=u9',
     )
-    expect(
-      userPageLocalFields(parseUserListFilters(params('disabled=0&worker=1'))),
-    ).toEqual(['Active / disabled', 'Worker flag'])
   })
 })

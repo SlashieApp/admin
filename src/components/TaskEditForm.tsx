@@ -3,24 +3,20 @@
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
-import { AdminTasks, AdminUpdateTask, TaskCore } from '@/graphql/operations'
+import { AdminTasks, AdminUpdateTask } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
+import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import {
-  graphqlErrorMessage,
-  isMissingAdminFieldError,
-} from '@/lib/graphqlErrors'
-import {
-  TASK_CATEGORIES,
   TASK_STATUSES,
   buildAdminUpdateTaskInput,
   taskToFormValues,
   type TaskEditFormValues,
 } from '@/lib/taskInput'
+import { TASK_CATEGORIES } from '@/lib/taskList'
 import { Currency, TaskBudgetType, TaskPaymentMethod } from '@codegen/schema'
 import type {
   AdminTasksQuery,
   AdminUpdateTaskMutation,
-  TaskCoreQuery,
 } from '@codegen/schema'
 
 type Props = {
@@ -34,7 +30,6 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState<string | null>(null)
-  const [usedFallback, setUsedFallback] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -44,10 +39,9 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
       setLoading(true)
       setLoadError(null)
       try {
-        const loaded = await loadTask(taskId)
+        const task = await loadTask(taskId)
         if (cancelled) return
-        setValues(taskToFormValues(loaded.task))
-        setUsedFallback(loaded.fallback)
+        setValues(taskToFormValues(task))
       } catch (error) {
         if (!cancelled) setLoadError(graphqlErrorMessage(error))
       } finally {
@@ -87,13 +81,7 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
       setValues(taskToFormValues(updated))
       setSaveOk('Saved with god-mode adminUpdateTask.')
     } catch (error) {
-      if (isMissingAdminFieldError(error)) {
-        setSaveError(
-          'adminUpdateTask is not on this Apollo yet (BE-42). Point NEXT_PUBLIC_GRAPHQL_URL at an API that has the @admin mutation.',
-        )
-      } else {
-        setSaveError(graphqlErrorMessage(error))
-      }
+      setSaveError(graphqlErrorMessage(error))
     } finally {
       setSaving(false)
     }
@@ -121,12 +109,6 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
         </div>
       )}
 
-      {usedFallback ? (
-        <p className="banner banner-warn">
-          Loaded via public <code>task</code> query. Save still requires BE-42{' '}
-          <code>adminUpdateTask</code>.
-        </p>
-      ) : null}
       {saveError ? <p className="banner banner-error">{saveError}</p> : null}
       {saveOk ? <p className="banner banner-ok">{saveOk}</p> : null}
 
@@ -304,28 +286,15 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
   )
 }
 
-async function loadTask(id: string): Promise<{
-  task: AdminTasksQuery['adminTasks'][number]
-  fallback: boolean
-}> {
-  try {
-    const result = await apolloClient.query<AdminTasksQuery>({
-      query: AdminTasks,
-      variables: { filter: { id }, first: 1 },
-      fetchPolicy: 'network-only',
-    })
-    const task = result.data?.adminTasks?.[0]
-    if (task) return { task, fallback: false }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  const result = await apolloClient.query<TaskCoreQuery>({
-    query: TaskCore,
-    variables: { id },
+async function loadTask(
+  id: string,
+): Promise<AdminTasksQuery['adminTasks']['items'][number]> {
+  const result = await apolloClient.query<AdminTasksQuery>({
+    query: AdminTasks,
+    variables: { filter: { id }, first: 1 },
     fetchPolicy: 'network-only',
   })
-  const task = result.data?.task
+  const task = result.data?.adminTasks.items[0]
   if (!task) throw new Error('Task not found')
-  return { task, fallback: true }
+  return task
 }

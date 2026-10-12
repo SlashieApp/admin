@@ -1,20 +1,14 @@
 import {
   AdminFeedbackDraftReply,
-  AdminFeedbackDraftReplyCore,
-  AdminFeedbackDraftReplyMutation,
   AdminFeedbackSummary,
   AdminFeedbacks,
-  AdminFeedbacksCore,
   AdminUpdateFeedbackStatus,
-  AdminUpdateFeedbackStatusCore,
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
-import { graphqlErrorMessage, isMissingAdminFieldError } from '@/lib/graphqlErrors'
 import {
   feedbackFromApi,
   sortFeedbacksOpenFirst,
   toAdminFeedbacksVariables,
-  type FeedbackApiPayload,
   type FeedbackCategoryFilter,
   type FeedbackDraftReply,
   type FeedbackPage,
@@ -24,215 +18,61 @@ import {
   type FeedbackSummary,
 } from '@/lib/feedback'
 import type {
-  AdminFeedbackDraftReplyCoreQuery,
-  AdminFeedbackDraftReplyMutationMutation,
   AdminFeedbackDraftReplyQuery,
   AdminFeedbackSummaryQuery,
-  AdminFeedbacksCoreQuery,
   AdminFeedbacksQuery,
-  AdminUpdateFeedbackStatusCoreMutation,
   AdminUpdateFeedbackStatusMutation,
 } from '@codegen/schema'
-
-export type FeedbackListResult = {
-  items: FeedbackRow[]
-  nextCursor: string | null
-  banner: string | null
-}
-
-const MISSING_API =
-  'adminFeedbacks is not on this Apollo yet (BE-48). Product feedback inbox will appear when that API lands.'
-
-function asFeedbackRow(row: FeedbackApiPayload): FeedbackRow {
-  return feedbackFromApi(row)
-}
-
-async function queryAdminFeedbacks(
-  variables: ReturnType<typeof toAdminFeedbacksVariables>,
-): Promise<FeedbackPage> {
-  const result = await apolloClient.query<AdminFeedbacksQuery>({
-    query: AdminFeedbacks,
-    variables,
-    fetchPolicy: 'network-only',
-  })
-  const page = result.data?.adminFeedbacks
-  return {
-    items: (page?.items ?? []).map(asFeedbackRow),
-    nextCursor: page?.nextCursor ?? null,
-  }
-}
-
-async function queryAdminFeedbacksCore(
-  variables: ReturnType<typeof toAdminFeedbacksVariables>,
-): Promise<FeedbackPage> {
-  const result = await apolloClient.query<AdminFeedbacksCoreQuery>({
-    query: AdminFeedbacksCore,
-    variables,
-    fetchPolicy: 'network-only',
-  })
-  const page = result.data?.adminFeedbacks
-  return {
-    items: (page?.items ?? []).map(asFeedbackRow),
-    nextCursor: page?.nextCursor ?? null,
-  }
-}
-
-function decorateList(
-  items: FeedbackRow[],
-  status: FeedbackStatusFilter,
-): FeedbackRow[] {
-  if (status === 'ALL') return sortFeedbacksOpenFirst(items)
-  return items
-}
 
 export async function listAdminFeedbacks(input: {
   status: FeedbackStatusFilter
   category: FeedbackCategoryFilter
   after?: string | null
   first?: number
-}): Promise<FeedbackListResult> {
-  const base = toAdminFeedbacksVariables(input)
-
-  try {
-    const page = await queryAdminFeedbacks(base)
-    return {
-      items: decorateList(page.items, input.status),
-      nextCursor: page.nextCursor ?? null,
-      banner: null,
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) {
-      throw new Error(graphqlErrorMessage(error))
-    }
-  }
-
-  try {
-    const page = await queryAdminFeedbacksCore(base)
-    return {
-      items: decorateList(page.items, input.status),
-      nextCursor: page.nextCursor ?? null,
-      banner: null,
-    }
-  } catch (error) {
-    if (isMissingAdminFieldError(error)) {
-      throw new Error(MISSING_API)
-    }
-    throw new Error(graphqlErrorMessage(error))
+}): Promise<FeedbackPage> {
+  const result = await apolloClient.query<AdminFeedbacksQuery>({
+    query: AdminFeedbacks,
+    variables: toAdminFeedbacksVariables(input),
+    fetchPolicy: 'network-only',
+  })
+  const page = result.data?.adminFeedbacks
+  const items = (page?.items ?? []).map(feedbackFromApi)
+  return {
+    items: input.status === 'ALL' ? sortFeedbacksOpenFirst(items) : items,
+    nextCursor: page?.nextCursor ?? null,
   }
 }
 
 export async function loadFeedbackSummary(): Promise<FeedbackSummary | null> {
-  try {
-    const result = await apolloClient.query<AdminFeedbackSummaryQuery>({
-      query: AdminFeedbackSummary,
-      fetchPolicy: 'network-only',
-    })
-    const summary = result.data?.adminFeedbackSummary
-    if (!summary) return null
-    return {
-      total: summary.total,
-      open: summary.open,
-      reviewed: summary.reviewed,
-      replied: summary.replied,
-    }
-  } catch (error) {
-    if (isMissingAdminFieldError(error)) return null
-    throw new Error(graphqlErrorMessage(error))
-  }
+  const result = await apolloClient.query<AdminFeedbackSummaryQuery>({
+    query: AdminFeedbackSummary,
+    fetchPolicy: 'network-only',
+  })
+  return result.data?.adminFeedbackSummary ?? null
 }
 
 export async function updateAdminFeedbackStatus(
   id: string,
   status: FeedbackStatus,
 ): Promise<FeedbackRow> {
-  try {
-    const result =
-      await apolloClient.mutate<AdminUpdateFeedbackStatusMutation>({
-        mutation: AdminUpdateFeedbackStatus,
-        variables: { id, status },
-      })
-    const updated = result.data?.adminUpdateFeedbackStatus
-    if (!updated) throw new Error('adminUpdateFeedbackStatus returned no feedback')
-    return asFeedbackRow(updated)
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result =
-      await apolloClient.mutate<AdminUpdateFeedbackStatusCoreMutation>({
-        mutation: AdminUpdateFeedbackStatusCore,
-        variables: { id, status },
-      })
-    const updated = result.data?.adminUpdateFeedbackStatus
-    if (!updated) throw new Error('adminUpdateFeedbackStatus returned no feedback')
-    return asFeedbackRow(updated)
-  } catch (error) {
-    if (isMissingAdminFieldError(error)) {
-      throw new Error(
-        'adminUpdateFeedbackStatus is not on this Apollo yet (BE-48).',
-      )
-    }
-    throw error
-  }
-}
-
-function asDraft(draft: {
-  subject: string
-  bodyText: string
-  bodyHtml?: string | null
-}): FeedbackDraftReply {
-  return {
-    subject: draft.subject,
-    bodyText: draft.bodyText,
-    bodyHtml: draft.bodyHtml,
-  }
+  const result = await apolloClient.mutate<AdminUpdateFeedbackStatusMutation>({
+    mutation: AdminUpdateFeedbackStatus,
+    variables: { id, status },
+  })
+  const updated = result.data?.adminUpdateFeedbackStatus
+  if (!updated) throw new Error('adminUpdateFeedbackStatus returned no feedback')
+  return feedbackFromApi(updated)
 }
 
 export async function loadFeedbackDraftReply(
   id: string,
 ): Promise<FeedbackDraftReply> {
-  try {
-    const result = await apolloClient.query<AdminFeedbackDraftReplyQuery>({
-      query: AdminFeedbackDraftReply,
-      variables: { id },
-      fetchPolicy: 'network-only',
-    })
-    const draft = result.data?.adminFeedbackDraftReply
-    if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
-    return asDraft(draft)
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result = await apolloClient.query<AdminFeedbackDraftReplyCoreQuery>({
-      query: AdminFeedbackDraftReplyCore,
-      variables: { id },
-      fetchPolicy: 'network-only',
-    })
-    const draft = result.data?.adminFeedbackDraftReply
-    if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
-    return asDraft(draft)
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result =
-      await apolloClient.mutate<AdminFeedbackDraftReplyMutationMutation>({
-        mutation: AdminFeedbackDraftReplyMutation,
-        variables: { id },
-      })
-    const draft = result.data?.adminFeedbackDraftReply
-    if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
-    return asDraft(draft)
-  } catch (error) {
-    if (isMissingAdminFieldError(error)) {
-      throw new Error(
-        'adminFeedbackDraftReply is not on this Apollo yet (BE-48).',
-      )
-    }
-    throw error
-  }
+  const result = await apolloClient.query<AdminFeedbackDraftReplyQuery>({
+    query: AdminFeedbackDraftReply,
+    variables: { id },
+    fetchPolicy: 'network-only',
+  })
+  const draft = result.data?.adminFeedbackDraftReply
+  if (!draft) throw new Error('adminFeedbackDraftReply returned no draft')
+  return draft
 }

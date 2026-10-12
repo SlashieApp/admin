@@ -1,9 +1,8 @@
 import { isWorkerUser } from '@/lib/userInput'
 import {
+  dayEndIso,
+  dayStartIso,
   DEFAULT_TABLE_PAGE_SIZE,
-  includesNormalized,
-  inDateRange,
-  pageLocalNotice,
   parseDateInput,
   parseOptionalString,
   parsePageSize,
@@ -23,12 +22,11 @@ import {
 
 export type UserListFilters = {
   q: string
-  email: string
-  name: string
   disabled: TriState
   worker: TriState
   from: string
   to: string
+  after: string
   first: number
   sort: string
   dir: SortDir
@@ -45,12 +43,11 @@ export type UserListRow = {
 
 const EMPTY_FILTERS: UserListFilters = {
   q: '',
-  email: '',
-  name: '',
   disabled: 'all',
   worker: 'all',
   from: '',
   to: '',
+  after: '',
   first: DEFAULT_TABLE_PAGE_SIZE,
   sort: '',
   dir: 'desc',
@@ -63,12 +60,11 @@ export function userFiltersFromForm(
   return {
     ...current,
     q: String(data.get('q') ?? '').trim(),
-    email: String(data.get('email') ?? '').trim(),
-    name: String(data.get('name') ?? '').trim(),
     disabled: parseTriState(String(data.get('disabled') ?? '')),
     worker: parseTriState(String(data.get('worker') ?? '')),
     from: parseDateInput(String(data.get('from') ?? '')),
     to: parseDateInput(String(data.get('to') ?? '')),
+    after: '',
   }
 }
 
@@ -77,71 +73,38 @@ export function parseUserListFilters(
 ): UserListFilters {
   return {
     q: parseOptionalString(params.get('q')),
-    email: parseOptionalString(params.get('email')),
-    name: parseOptionalString(params.get('name')),
     disabled: parseTriState(params.get('disabled')),
     worker: parseTriState(params.get('worker')),
     from: parseDateInput(params.get('from')),
     to: parseDateInput(params.get('to')),
+    after: parseOptionalString(params.get('after')),
     first: parsePageSize(params.get('first')),
     sort: parseOptionalString(params.get('sort')),
     dir: parseSortDir(params.get('dir')),
   }
 }
 
-/** Prefer the generic q, then email, then name for the server search string. */
-export function userServerSearch(filters: UserListFilters): string {
-  return filters.q || filters.email || filters.name
-}
-
 export function toUserListQueryVariables(
   filters: UserListFilters,
 ): AdminUserListVariables {
-  return toAdminUserListVariables(
-    userServerSearch(filters),
+  const vars = toAdminUserListVariables(
+    filters.q,
     filters.first || DEFAULT_ADMIN_PAGE_SIZE,
   )
+  if (filters.disabled !== 'all') vars.disabled = filters.disabled === 'yes'
+  if (filters.worker !== 'all') vars.isWorker = filters.worker === 'yes'
+  if (filters.from) vars.createdAfter = dayStartIso(filters.from)
+  if (filters.to) vars.createdBefore = dayEndIso(filters.to)
+  if (filters.after) vars.after = filters.after
+  return vars
 }
 
-export function userPageLocalFields(filters: UserListFilters): string[] {
-  const fields: string[] = []
-  if (filters.q && filters.email) fields.push('Email')
-  if (filters.q && filters.name) fields.push('Name')
-  if (!filters.q && filters.email && filters.name) fields.push('Name')
-  if (filters.disabled !== 'all') fields.push('Active / disabled')
-  if (filters.worker !== 'all') fields.push('Worker flag')
-  if (filters.from || filters.to) fields.push('Created date')
-  return fields
-}
-
-export function userPageLocalNotice(filters: UserListFilters): string | null {
-  return pageLocalNotice(userPageLocalFields(filters))
-}
-
-export function refineUsers<T extends UserListRow>(
+/** Sorts the fetched page only (column sort). Filters are all server-side. */
+export function sortUsers<T extends UserListRow>(
   rows: T[],
   filters: UserListFilters,
 ): T[] {
-  const filtered = rows.filter((row) => {
-    if (filters.email && !includesNormalized(row.email, filters.email)) {
-      return false
-    }
-    if (
-      filters.name &&
-      !includesNormalized(row.profile?.name, filters.name) &&
-      !includesNormalized(row.id, filters.name)
-    ) {
-      return false
-    }
-    if (filters.disabled === 'yes' && !row.disabled) return false
-    if (filters.disabled === 'no' && row.disabled) return false
-    const worker = isWorkerUser(row)
-    if (filters.worker === 'yes' && !worker) return false
-    if (filters.worker === 'no' && worker) return false
-    if (!inDateRange(row.createdAt, filters.from, filters.to)) return false
-    return true
-  })
-  return sortRows(filtered, filters.sort, filters.dir, userSortValue)
+  return sortRows(rows, filters.sort, filters.dir, userSortValue)
 }
 
 export function userSortValue(row: UserListRow, key: string): unknown {
@@ -165,14 +128,13 @@ export function userListPath(filters: Partial<UserListFilters> = {}): string {
   const next = { ...EMPTY_FILTERS, ...filters }
   const params = new URLSearchParams()
   setParam(params, 'q', next.q)
-  setParam(params, 'email', next.email)
-  setParam(params, 'name', next.name)
   const disabled = triStateToParam(next.disabled)
   if (disabled) params.set('disabled', disabled)
   const worker = triStateToParam(next.worker)
   if (worker) params.set('worker', worker)
   setParam(params, 'from', next.from)
   setParam(params, 'to', next.to)
+  setParam(params, 'after', next.after)
   if (next.first !== DEFAULT_TABLE_PAGE_SIZE) {
     params.set('first', String(next.first))
   }

@@ -9,14 +9,10 @@ import {
   AdminSetUserDisabled,
   AdminUpdateUser,
   AdminUserDetail,
-  AdminUserDetailCore,
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatWhen } from '@/lib/dossier'
-import {
-  graphqlErrorMessage,
-  isMissingAdminFieldError,
-} from '@/lib/graphqlErrors'
+import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import {
   buildAdminUpdateUserInput,
   isWorkerUser,
@@ -26,11 +22,10 @@ import {
 import type {
   AdminSetUserDisabledMutation,
   AdminUpdateUserMutation,
-  AdminUserDetailCoreQuery,
   AdminUserDetailQuery,
 } from '@codegen/schema'
 
-type UserRow = AdminUserDetailQuery['adminUsers'][number]
+type UserRow = AdminUserDetailQuery['adminUsers']['items'][number]
 
 export function UserDetail({ userId }: { userId: string }) {
   const router = useRouter()
@@ -42,20 +37,22 @@ export function UserDetail({ userId }: { userId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState<string | null>(null)
-  const [banner, setBanner] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
       setError(null)
-      setBanner(null)
       try {
-        const next = await loadUser(userId)
-        if (cancelled) return
-        setUser(next.user)
-        setValues(userToFormValues(next.user))
-        setBanner(next.banner)
+        const result = await apolloClient.query<AdminUserDetailQuery>({
+          query: AdminUserDetail,
+          variables: { id: userId },
+          fetchPolicy: 'network-only',
+        })
+        const next = result.data?.adminUsers.items[0]
+        if (cancelled || !next) return
+        setUser(next)
+        setValues(userToFormValues(next))
       } catch (err) {
         if (!cancelled) setError(graphqlErrorMessage(err))
       } finally {
@@ -92,17 +89,11 @@ export function UserDetail({ userId }: { userId: string }) {
       })
       const updated = result.data?.adminUpdateUser
       if (!updated) throw new Error('adminUpdateUser returned no user')
-      setUser((current) => ({ ...(current ?? updated), ...updated }))
+      setUser((current) => current && { ...current, ...updated })
       setValues(userToFormValues(updated))
       setSaveOk('Saved with adminUpdateUser.')
     } catch (err) {
-      if (isMissingAdminFieldError(err)) {
-        setSaveError(
-          'adminUpdateUser is not on this Apollo yet (BE-43). Point NEXT_PUBLIC_GRAPHQL_URL at an API that has the @admin mutation.',
-        )
-      } else {
-        setSaveError(graphqlErrorMessage(err))
-      }
+      setSaveError(graphqlErrorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -121,20 +112,10 @@ export function UserDetail({ userId }: { userId: string }) {
       })
       const updated = result.data?.adminSetUserDisabled
       if (!updated) throw new Error('adminSetUserDisabled returned no user')
-      setUser((current) => ({
-        ...(current ?? updated),
-        ...updated,
-        disabled: updated.disabled ?? nextDisabled,
-      }))
+      setUser((current) => current && { ...current, ...updated })
       setSaveOk(nextDisabled ? 'User disabled.' : 'User re-enabled.')
     } catch (err) {
-      if (isMissingAdminFieldError(err)) {
-        setSaveError(
-          'adminSetUserDisabled is not on this Apollo yet (BE-43).',
-        )
-      } else {
-        setSaveError(graphqlErrorMessage(err))
-      }
+      setSaveError(graphqlErrorMessage(err))
     } finally {
       setToggling(false)
     }
@@ -145,7 +126,7 @@ export function UserDetail({ userId }: { userId: string }) {
   if (!user || !values) return <p className="muted">User not found.</p>
 
   const worker = user.worker
-  const posted = user.tasksPosted ?? []
+  const posted = user.tasksPosted
 
   return (
     <section className="stack">
@@ -153,7 +134,7 @@ export function UserDetail({ userId }: { userId: string }) {
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => router.push('/?mode=users')}
+          onClick={() => router.push('/users')}
         >
           ← Users
         </button>
@@ -176,7 +157,6 @@ export function UserDetail({ userId }: { userId: string }) {
         </p>
       )}
 
-      {banner ? <p className="banner banner-warn">{banner}</p> : null}
       {saveError ? <p className="banner banner-error">{saveError}</p> : null}
       {saveOk ? <p className="banner banner-ok">{saveOk}</p> : null}
       {user.disabled ? (
@@ -221,7 +201,6 @@ export function UserDetail({ userId }: { userId: string }) {
                 </dd>
               </div>
             </dl>
-            {user.profile?.bio ? <p>{user.profile.bio}</p> : null}
           </article>
 
           <article className="section">
@@ -359,44 +338,4 @@ export function UserDetail({ userId }: { userId: string }) {
       <PostHogAnalytics kind="user" userId={userId} email={user.email} />
     </section>
   )
-}
-
-async function loadUser(id: string): Promise<{
-  user: UserRow
-  banner: string | null
-}> {
-  try {
-    const result = await apolloClient.query<AdminUserDetailQuery>({
-      query: AdminUserDetail,
-      variables: { id, first: 1 },
-      fetchPolicy: 'network-only',
-    })
-    const user = result.data?.adminUsers?.[0]
-    if (user) return { user, banner: null }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-  }
-
-  try {
-    const result = await apolloClient.query<AdminUserDetailCoreQuery>({
-      query: AdminUserDetailCore,
-      variables: { id, first: 1 },
-      fetchPolicy: 'network-only',
-    })
-    const user = result.data?.adminUsers?.[0]
-    if (user) {
-      return {
-        user,
-        banner:
-          'Some BE-43 user fields (disabled / tasksPosted) are missing. Showing the core adminUsers record.',
-      }
-    }
-  } catch (error) {
-    if (!isMissingAdminFieldError(error)) throw error
-    throw new Error(
-      'adminUsers is not on this Apollo yet (BE-43). User search and management need that API.',
-    )
-  }
-
-  throw new Error('User not found')
 }

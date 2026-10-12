@@ -14,7 +14,6 @@ describe('userToFormValues + buildAdminUpdateUserInput', () => {
       profile: {
         name: 'Alex Poster',
         contactNumber: '+447700900123',
-        bio: 'Needs a plumber',
       },
     })
 
@@ -29,7 +28,7 @@ describe('userToFormValues + buildAdminUpdateUserInput', () => {
   it('sends empty optional strings as null so ops can clear them', () => {
     const values = userToFormValues({
       emailVerified: false,
-      profile: { name: '  ', contactNumber: '', bio: null },
+      profile: { name: '  ', contactNumber: '' },
     })
     expect(buildAdminUpdateUserInput(values)).toEqual({
       name: null,
