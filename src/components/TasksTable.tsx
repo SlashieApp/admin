@@ -15,6 +15,11 @@ import { bboxesEqual, taskCoordinates } from '@/lib/geo'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
 import { nextSort } from '@/lib/listParams'
 import {
+  isTaskSuspended,
+  suspensionReason,
+  type TaskSuspensionLike,
+} from '@/lib/suspension'
+import {
   sortTasks,
   TASK_BUDGET_TYPES,
   TASK_STATUSES,
@@ -186,15 +191,10 @@ export function TasksTable() {
       ),
     },
     {
-      key: 'visibility',
-      header: 'Visibility',
-      sortKey: 'visibility',
-      render: (task) =>
-        task.hidden ? (
-          <span className="pill pill-warn">hidden</span>
-        ) : (
-          <span className="pill">public</span>
-        ),
+      key: 'suspended',
+      header: 'Suspended',
+      sortKey: 'suspended',
+      render: (task) => <SuspensionCell suspension={task.suspension} />,
     },
     {
       key: 'date',
@@ -316,15 +316,15 @@ export function TasksTable() {
           </select>
         </label>
         <label className="field">
-          Visibility
+          Suspended
           <select
             className="input"
-            name="visibility"
-            defaultValue={filters.visibility}
+            name="suspended"
+            defaultValue={filters.suspended}
           >
-            <option value="all">All</option>
-            <option value="public">Public</option>
-            <option value="hidden">Hidden</option>
+            <option value="all">Any</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
           </select>
         </label>
         <label className="field">
@@ -406,20 +406,38 @@ export function TasksTable() {
   )
 }
 
+/** Table cell: a Suspended pill with the reason (by Slashie, poster's account), or No. */
+function SuspensionCell({ suspension }: { suspension: TaskSuspensionLike }) {
+  if (!isTaskSuspended(suspension)) return <span className="muted">No</span>
+  return (
+    <>
+      <span className="pill pill-warn">Suspended</span>
+      <span className="meta"> · {suspensionReason(suspension)}</span>
+    </>
+  )
+}
+
 function TaskCard({ task }: { task: TaskListRow }) {
+  const suspended = isTaskSuspended(task.suspension)
   return (
     <>
       <div className="card-top">
         <Link href={`/tasks/${task.id}`} className="table-link">
           {task.title}
         </Link>
-        <span className="pill">{task.status}</span>
+        <span className="pills">
+          {suspended ? <span className="pill pill-warn">Suspended</span> : null}
+          <span className="pill">{task.status}</span>
+        </span>
       </div>
       <p className="meta">
         {task.categories.join(', ')}
         {task.poster ? ` · ${displayName(task.poster)}` : ''}
         {` · ${formatMoney(task.budget?.amount, task.budget?.currency)}`}
       </p>
+      {suspended ? (
+        <p className="meta">Suspended {suspensionReason(task.suspension)}</p>
+      ) : null}
     </>
   )
 }

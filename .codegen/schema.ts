@@ -140,7 +140,11 @@ export type AdminOpsSummary = {
    * disabled.
    */
   disabledUsers: Scalars['Int']['output'];
-  /** Point-in-time: tasks with `hidden: true`. */
+  /**
+   * Point-in-time: tasks suspended by Slashie (`Task.suspension.bySlashie`).
+   * Tasks suspended only because the poster's account is suspended are not
+   * counted.
+   */
   hiddenTasks: Scalars['Int']['output'];
   /** Orders that reached COMPLETED (mutual Done or 7-day auto-Done) in the window, by `closedAt`. */
   jobsCompleted: AdminOpsMetric;
@@ -169,7 +173,7 @@ export type AdminOpsSummary = {
   reportsSubmitted: AdminOpsMetric;
   /** Point-in-time: every `TaskStatus` and its current document count. */
   tasksByStatus: Array<AdminTaskStatusCount>;
-  /** Tasks with `createdAt` in the window (all statuses, including hidden/drafts). */
+  /** Tasks with `createdAt` in the window (all statuses, including suspended/drafts). */
   tasksCreated: AdminOpsMetric;
   /**
    * Workers whose setup was submitted in the window (`setupCompletedAt`, the same
@@ -257,9 +261,12 @@ export enum AdminTaskActivitySource {
 
 /**
  * Everything related to one task for ops. Prefer this over stitching public queries.
- * Task is owner-shaped so location/address/hidden are visible. Quotes always
- * come with the quoting worker (`Quote.workerUserId`, and `Quote.worker`
- * including the email).
+ * Task is owner-shaped so location/address and both suspension reasons
+ * (`task.suspension`) are visible. Quotes always come with the quoting worker
+ * (`Quote.workerUserId`, and `Quote.worker` including the email). Suspensions
+ * and their lifting are `TIMELINE` activity rows (`TASK_SUSPENDED`,
+ * `TASK_UNSUSPENDED`) whose `body` holds the reason and whose `actorUserId` is
+ * the admin who did it.
  */
 export type AdminTaskDossier = {
   activity: Array<AdminTaskActivity>;
@@ -274,7 +281,7 @@ export type AdminTaskDossier = {
   workers: Array<Worker>;
 };
 
-/** Ops search across all tasks (including hidden, cancelled, and non-OPEN). */
+/** Ops search across all tasks (including suspended, cancelled, and non-OPEN). */
 export type AdminTaskFilter = {
   /**
    * Map viewport: tasks whose `location` falls inside the box (inclusive).
@@ -297,7 +304,10 @@ export type AdminTaskFilter = {
   createdAfter?: InputMaybe<Scalars['DateTime']['input']>;
   /** Inclusive upper bound on task `createdAt` (`createdAt <= value`). */
   createdBefore?: InputMaybe<Scalars['DateTime']['input']>;
-  /** When set, only hidden or only visible tasks. */
+  /**
+   * When set, only tasks suspended by Slashie, or only tasks that are not.
+   * @deprecated Use `suspended`.
+   */
   hidden?: InputMaybe<Scalars['Boolean']['input']>;
   /** Exact task id lookup. */
   id?: InputMaybe<Scalars['ID']['input']>;
@@ -315,6 +325,11 @@ export type AdminTaskFilter = {
   search?: InputMaybe<Scalars['String']['input']>;
   /** Constrain by status(es). Omit for all statuses. */
   status?: InputMaybe<Array<TaskStatus>>;
+  /**
+   * When set, only suspended tasks (for any reason, see `Task.suspension`), or
+   * only tasks that are not suspended.
+   */
+  suspended?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 /**
@@ -337,7 +352,12 @@ export type AdminUpdateTaskInput = {
   /** Date and time preference. Pass null to clear. */
   datetime?: InputMaybe<TaskDateTimeInput>;
   description?: InputMaybe<Scalars['String']['input']>;
-  /** Hide from public discovery (`Query.tasks`) without cancelling the task. */
+  /**
+   * True suspends the task by Slashie, false lifts that; the same as
+   * `adminSetTaskSuspended` (it logs `TASK_SUSPENDED` / `TASK_UNSUSPENDED`, not
+   * a `TASK_UPDATED` line). A value that matches the task changes nothing.
+   * @deprecated Use `adminSetTaskSuspended`.
+   */
   hidden?: InputMaybe<Scalars['Boolean']['input']>;
   location?: InputMaybe<TaskLocationInput>;
   preferredContactMethod?: InputMaybe<TaskContactMethod>;
@@ -545,7 +565,17 @@ export enum FlashKind {
   /** Ask the viewer to review the other party. Carries `orderId`. */
   ReviewPrompt = 'REVIEW_PROMPT',
   /** Ops announcement in the `SYSTEM` thread. */
-  SystemAnnouncement = 'SYSTEM_ANNOUNCEMENT'
+  SystemAnnouncement = 'SYSTEM_ANNOUNCEMENT',
+  /**
+   * The owner cancelled the task. Each worker with a pending quote gets one,
+   * carrying their quote (still PENDING, so a reopen can bring it back).
+   */
+  TaskCancelled = 'TASK_CANCELLED',
+  /**
+   * The owner reopened the task (`reopenTask`). Each worker whose quote is
+   * pending again gets one, carrying their quote.
+   */
+  TaskReopened = 'TASK_REOPENED'
 }
 
 export type ForgotPasswordPayload = {
@@ -681,7 +711,9 @@ export type Mutation = {
    * Accept a worker's quote on one of its slots and create the Order (booked at that slot).
    * Works from Messages with a flash's `quoteId` and a `quote.proposedSlots` id.
    * Every other worker's PENDING quote becomes NOT_SELECTED, and each of them gets
-   * a `QUOTE_NOT_SELECTED` flash carrying their quote.
+   * a `QUOTE_NOT_SELECTED` flash carrying their quote. Errors include
+   * `TASK_NOT_OPEN` (also while cancelled), `TASK_SUSPENDED`, and
+   * `COUNTERPARTY_SUSPENDED` (the quoting worker's account is suspended).
    */
   acceptQuote: AcceptQuotePayload;
   /**
@@ -693,6 +725,8 @@ export type Mutation = {
    * Unlimited and Pro memberships bypass the cap.
    * Blocked while this worker has an ACCEPTED quote on the task.
    * Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
+   * A suspended task: `TASK_SUSPENDED` for a worker who already quoted on it,
+   * `TASK_NOT_FOUND` for anyone else.
    */
   addQuote: Quote;
   /** Ops soft-hide. Keeps the row. Does not add the author review-then-delete flag. */
@@ -710,9 +744,25 @@ export type Mutation = {
    */
   adminSendSystemFlash: AdminSendSystemFlashPayload;
   /**
-   * Disable or re-enable a marketplace account. Login still succeeds and
-   * returns `user.disabled: true`. `@auth` actions (except `Query.me`) throw
+   * Suspend a task by Slashie, or lift that suspension (BE-108). See
+   * `TaskSuspension`: the task leaves every public list, non-parties get
+   * `NOT_FOUND`, and everything on it is frozen. Lifting it leaves a suspension
+   * because the poster's account is suspended in place. Logs `TASK_SUSPENDED` /
+   * `TASK_UNSUSPENDED` (reason `SLASHIE`); a call that changes nothing logs
+   * nothing. Throws `TASK_NOT_FOUND`.
+   */
+  adminSetTaskSuspended: Task;
+  /**
+   * Disable (suspend) or re-enable a marketplace account. Login still succeeds
+   * and returns `user.disabled: true`. `@auth` actions (except `Query.me`) throw
    * `ACCOUNT_DISABLED`. Password-reset tokens are cleared on disable.
+   *
+   * Disabling also suspends every task the user posted
+   * (`Task.suspension.posterSuspended`, logged `TASK_SUSPENDED` with reason
+   * `POSTER_SUSPENDED`) and freezes their quotes and bookings on other people's
+   * tasks (`COUNTERPARTY_SUSPENDED` for the other party). Re-enabling lifts the
+   * poster suspension (`TASK_UNSUSPENDED`) but not a suspension by Slashie.
+   * Nothing else is rewritten either way.
    */
   adminSetUserDisabled: User;
   /** Set product-feedback status. Does not send the draft reply. */
@@ -738,10 +788,13 @@ export type Mutation = {
   /** The requester withdraws their reschedule request → ACTIVE. */
   cancelRescheduleRequest: Order;
   /**
-   * Cancel an open task owned by the current user. Errors:
-   * `TASK_HAS_ACCEPTED_QUOTE` (someone is booked), `TASK_ALREADY_CANCELLED` (a
-   * repeat call; nothing more is logged), `TASK_CHANGED` (it changed while
-   * cancelling; read it again).
+   * Cancel an open task owned by the current user. Pending quotes stay PENDING,
+   * so `reopenTask` can bring them back, but none can be accepted while the task
+   * is cancelled. Each worker with a pending quote gets a `TASK_CANCELLED` flash
+   * carrying their quote. Errors: `TASK_HAS_ACCEPTED_QUOTE` (someone is booked),
+   * `TASK_ALREADY_CANCELLED` (a repeat call; nothing more is logged),
+   * `TASK_CHANGED` (it changed while cancelling; read it again),
+   * `TASK_SUSPENDED`.
    */
   cancelTask: Task;
   /**
@@ -774,6 +827,9 @@ export type Mutation = {
   /**
    * Submit the caller's one review for a COMPLETED order. Open to either party,
    * not a founding cohort. Rate-limited to 10 reviews per account per UTC day.
+   * `createReview`, `updateReview` and `hideReview` are refused while the
+   * booking is frozen (BE-108): `TASK_SUSPENDED` (its task is suspended) or
+   * `COUNTERPARTY_SUSPENDED` (the other party's account is).
    */
   createReview: Review;
   /** Create a task (customer \"post a task\"). Requires authentication via request header. */
@@ -787,7 +843,8 @@ export type Mutation = {
   /**
    * Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
    * Works from Messages with a flash's `quoteId`. Raises `QUOTE_DECLINED` with the
-   * quote.
+   * quote. Errors include `TASK_SUSPENDED` and `COUNTERPARTY_SUSPENDED` (the
+   * quoting worker's account is suspended).
    */
   declineQuote: Quote;
   /** The other party rejects the request → ACTIVE with the old booked time. */
@@ -805,7 +862,7 @@ export type Mutation = {
    * (GPS included) removed. Replaces any earlier photo in that slot. Task poster
    * only, while the task is OPEN or DRAFT. Errors: `UPLOAD_NOT_FOUND`,
    * `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `INVALID_INDEX`, `TASK_NOT_FOUND`,
-   * `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`.
+   * `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`, `TASK_SUSPENDED`.
    */
   finalizeTaskImage: Scalars['String']['output'];
   forgotPassword: ForgotPasswordPayload;
@@ -858,6 +915,24 @@ export type Mutation = {
    * Errors: `INVALID_WEB_PUSH_SUBSCRIPTION`.
    */
   registerWebPushSubscription: WebPushSubscription;
+  /**
+   * Reopen one of your tasks for quotes (BE-108). Two cases:
+   * - A CANCELLED task goes back to OPEN. Quotes that were still PENDING can be
+   *   accepted again; declined and withdrawn ones stay closed.
+   * - A booked task (AWARDED, live order) whose booked worker's account is
+   *   suspended (`Order.counterpartySuspension.canReopen`): the order becomes
+   *   CANCELLED (`ORDER_CANCELLED`), that worker's quote DECLINED
+   *   (`QUOTE_DECLINED`), the task OPEN, and the quotes that were not selected
+   *   PENDING again.
+   * Logs `TASK_REOPENED`, and each worker whose quote is pending again gets a
+   * `TASK_REOPENED` flash carrying it. Errors: `TASK_NOT_FOUND`, `FORBIDDEN`
+   * (not the owner), `TASK_SUSPENDED` (a suspended task cannot be reopened),
+   * `TASK_ALREADY_OPEN` (OPEN or DRAFT), `WORKER_NOT_SUSPENDED` (booked to a
+   * worker whose account is active: cancel through the booking instead),
+   * `TASK_NOT_REOPENABLE` (anything else, such as a finished booking),
+   * `TASK_CHANGED` (it changed while reopening; read it again).
+   */
+  reopenTask: Task;
   /**
    * Delete my account. The account is disabled straight away and anonymised 30
    * days later unless restored. Open tasks are cancelled and pending quotes
@@ -918,7 +993,8 @@ export type Mutation = {
    * Errors: `MESSAGE_EMPTY`, `MESSAGE_TOO_LONG` (2000 characters), `FORBIDDEN`
    * (not the owner or accepted worker, or a system thread), `MESSAGE_LOCKED` (no
    * accepted quote yet), `MESSAGE_BLOCKED` (either side blocked the other),
-   * `MESSAGE_RATE_LIMITED`.
+   * `MESSAGE_RATE_LIMITED`, `TASK_SUSPENDED`, `COUNTERPARTY_SUSPENDED` (the
+   * other party's account is suspended).
    */
   sendMessage: ThreadItem;
   /**
@@ -983,6 +1059,7 @@ export type Mutation = {
   /**
    * Amend an existing task owned by the current user. Only allowed while the task
    * is `OPEN`/`DRAFT`; partial update (only provided fields change).
+   * Suspended: `TASK_SUSPENDED`.
    */
   updateTask: Task;
   /**
@@ -1018,6 +1095,7 @@ export type Mutation = {
    * get a `QUOTE_WITHDRAWN` flash. Accepted quotes cannot be withdrawn. The task
    * drops out of the worker pipeline and `Task.quotes`, and stops counting toward
    * the monthly quote limit. A later `addQuote` inserts a new PENDING row.
+   * Suspended task: `TASK_SUSPENDED`.
    */
   withdrawQuote: Quote;
 };
@@ -1045,6 +1123,12 @@ export type MutationAdminHideReviewArgs = {
 
 export type MutationAdminSendSystemFlashArgs = {
   input: AdminSendSystemFlashInput;
+};
+
+
+export type MutationAdminSetTaskSuspendedArgs = {
+  id: Scalars['ID']['input'];
+  suspended: Scalars['Boolean']['input'];
 };
 
 
@@ -1228,6 +1312,11 @@ export type MutationRegisterWebPushSubscriptionArgs = {
 };
 
 
+export type MutationReopenTaskArgs = {
+  taskId: Scalars['ID']['input'];
+};
+
+
 export type MutationRequestAccountDeletionArgs = {
   password?: InputMaybe<Scalars['String']['input']>;
 };
@@ -1389,6 +1478,16 @@ export type MyTasksAchievements = {
   worker: WorkerTaskAchievements;
 };
 
+/**
+ * A booking: one per accepted quote. A reopened task (`reopenTask`) can have
+ * more than one; `Task.orders` lists them newest first.
+ *
+ * Every order mutation is refused while the booking is frozen (BE-108):
+ * `TASK_SUSPENDED` when its task is suspended, `COUNTERPARTY_SUSPENDED` when the
+ * other party's account is suspended, `ACCOUNT_DISABLED` when the caller's is.
+ * The 7-day auto-Done and the lapse of a cancellation request wait too, and
+ * apply once nothing is suspended.
+ */
 export type Order = {
   agreedPrice: OrderAgreedPrice;
   /** When the other party is auto-marked Done (7 days after a one-sided Done). */
@@ -1399,6 +1498,13 @@ export type Order = {
   /** When the order reached COMPLETED or CANCELLED. */
   closedAt?: Maybe<Scalars['DateTime']['output']>;
   counterpartyCloseAction?: Maybe<OrderCloseAction>;
+  /**
+   * Set when the other party's account is suspended (BE-108), for the order's
+   * two parties only; null otherwise. The booking is frozen, not cancelled:
+   * every order mutation throws `COUNTERPARTY_SUSPENDED` for the viewer until
+   * ops lift the suspension, which restores it exactly as it was.
+   */
+  counterpartySuspension?: Maybe<OrderCounterpartySuspension>;
   createdAt: Scalars['DateTime']['output'];
   customerUserId: Scalars['ID']['output'];
   id: Scalars['ID']['output'];
@@ -1431,6 +1537,23 @@ export enum OrderCloseKind {
   Done = 'DONE',
   Failed = 'FAILED'
 }
+
+/** The other party on a booking has a suspended account (BE-108). */
+export type OrderCounterpartySuspension = {
+  /**
+   * True when the viewer may `reopenTask` to end this booking and take quotes
+   * again: the customer, while the booking is live and the task is not itself
+   * suspended. Always false for the worker, who only gets the notice.
+   */
+  canReopen: Scalars['Boolean']['output'];
+  /** Their public display name, for "{name}'s account has been suspended". */
+  name: Scalars['String']['output'];
+  /**
+   * Who is suspended: `WORKER` when the viewer is the customer, `CUSTOMER` when
+   * the viewer is the worker.
+   */
+  role: OrderPartyRole;
+};
 
 /** Private to the party who chose it. */
 export enum OrderFailedReason {
@@ -1487,7 +1610,10 @@ export type OrderReschedule = {
 
 /** What the signed-in party can see and do for reviews on one order. */
 export type OrderReviewState = {
-  /** True when this party is on a COMPLETED order and has not used their one review. */
+  /**
+   * True when this party is on a COMPLETED order and has not used their one
+   * review. False while the booking is frozen by a suspension (BE-108).
+   */
   canSubmit: Scalars['Boolean']['output'];
   /** The other party's review, or null while it is locked, missing, or hidden. */
   counterpartReview?: Maybe<Review>;
@@ -1645,7 +1771,7 @@ export type PublicProfile = {
   openTaskCount: Scalars['Int']['output'];
   /**
    * Tasks this user posted that are publicly discoverable: status `OPEN` and
-   * not `hidden`. Newest first. Same redaction and limits as `PublicUser.openTasks`.
+   * not suspended. Newest first. Same redaction and limits as `PublicUser.openTasks`.
    */
   openTasks: Array<Task>;
   profile: PublicUserProfile;
@@ -1870,7 +1996,7 @@ export type PublicUser = {
   openTaskCount: Scalars['Int']['output'];
   /**
    * Tasks this user posted that are publicly discoverable: status `OPEN` and
-   * not `hidden`. Newest first. Visitor-safe task fields (same redaction as
+   * not suspended. Newest first. Visitor-safe task fields (same redaction as
    * `Query.tasks` / public `task(id)`).
    *
    * `first` defaults to 10 and is capped at 20. Values below 1 are treated as 1.
@@ -2016,7 +2142,7 @@ export type Query = {
   /** Review state for one order. Caller must be a party on the order. */
   orderReviews: OrderReviewState;
   /**
-   * Most-used categories on open, visible tasks, most used first: suggestions
+   * Most-used categories on open tasks that are not suspended, most used first: suggestions
    * for the create-task category input. Grouped ignoring case; each shows its
    * most common spelling. `first` defaults to 12, capped at 50. Anonymous OK.
    */
@@ -2038,11 +2164,19 @@ export type Query = {
    * private admin panel. Not visible to reporters or the public.
    */
   reports: ReportPage;
-  /** Single task detail entry point. Field visibility depends on viewer role (poster, participant, public). */
+  /**
+   * Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
+   * A cancelled or suspended task (`Task.suspension`) is only for its owner and
+   * parties (workers with a quote, any status, or a booking on it), so the
+   * `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A finished booking is
+   * only for its customer and worker. Everyone else, guests included, gets
+   * `NOT_FOUND`.
+   */
   task?: Maybe<Task>;
   /**
-   * Open tasks for discovery (map and search). Center defaults to London. No radius
-   * limit unless `filter.radiusMiles` is passed. Nearest first by default.
+   * Open tasks for discovery (map and search), never suspended ones. Center
+   * defaults to London. No radius limit unless `filter.radiusMiles` is passed.
+   * Nearest first by default.
    * `filter.status`, `filter.ownerUserId`, and `filter.hubSection` are ignored (always OPEN-only).
    * `Task.location` is discovery-style on map browse.
    * `DISTANCE` sort requires `filter.lat` and `filter.lng`.
@@ -2267,6 +2401,13 @@ export type Quote = {
    * owner does not get it, even after accepting.
    */
   worker?: Maybe<User>;
+  /**
+   * True when the quoting worker's account is suspended (BE-108): the quote is
+   * frozen, so it cannot be accepted or declined (`COUNTERPARTY_SUSPENDED`)
+   * until ops lift the suspension. Only for viewers who get `worker`; false for
+   * everyone else.
+   */
+  workerSuspended: Scalars['Boolean']['output'];
   /**
    * The quoting worker's user id. Only the task owner, that worker, and ops
    * (through the admin queries) get it. Null for everyone else, guests included.
@@ -2503,8 +2644,9 @@ export type Task = {
   /** Longer description of the work required. */
   description: Scalars['String']['output'];
   /**
-   * When true, the task is hidden from public map discovery. Set by ops via
-   * `adminUpdateTask`.
+   * True when Slashie suspended the task (`suspension.bySlashie`). False when it
+   * is suspended only because the poster's account is suspended.
+   * @deprecated Use `suspension.bySlashie`.
    */
   hidden: Scalars['Boolean']['output'];
   /** Task identifier. */
@@ -2545,13 +2687,23 @@ export type Task = {
   /** Workflow status of the task. */
   status: TaskStatus;
   /**
+   * Why the task is suspended, for its owner, its parties (workers with a quote
+   * or a booking on it) and ops. Null when it is not suspended. Nobody else can
+   * reach a suspended task: it is in no public list, and `task(id)` throws
+   * `NOT_FOUND` for them.
+   */
+  suspension?: Maybe<TaskSuspension>;
+  /**
    * The task's activity log, oldest first: one entry per event, resolved for
    * the viewer when read. Chat messages are not events.
    * - Task owner, and ops through the admin queries: every event, with
    *   `actor` and `worker`.
+   * - Suspension lines (`TASK_SUSPENDED`, `TASK_UNSUSPENDED`) only for the
+   *   owner, ops and the task's parties (workers with a quote or a booking on
+   *   it), never with an `actor`.
    * - Everyone else, guests included:
-   *   - task created, edited and cancelled, with the poster as `actor` (an ops
-   *     edit has no `actor`);
+   *   - task created, edited, cancelled and reopened, with the poster as
+   *     `actor` (an ops edit has no `actor`);
    *   - every quote event, without `actor` or `worker`, unless it is about the
    *     viewer's own quote. `QUOTE_ACCEPTED` is the "booked" line;
    *   - booking events (reschedule and cancellation requests and their
@@ -2634,7 +2786,8 @@ export enum TaskDateTimeType {
 
 /**
  * A task field that an edit can change. `STATUS` and `HIDDEN` only change in an
- * ops edit.
+ * ops edit. `HIDDEN` is only on edits logged before BE-108: hiding a task is now
+ * a suspension (`TASK_SUSPENDED`).
  */
 export enum TaskEditableField {
   Budget = 'BUDGET',
@@ -2785,13 +2938,40 @@ export enum TaskStatus {
 }
 
 /**
+ * Why a task is suspended (BE-108). A suspended task is frozen, not deleted: it
+ * is in no public list, only its owner and parties (workers with a quote or a
+ * booking on it) can open it, and nothing on it can be quoted, accepted,
+ * declined, withdrawn, edited, cancelled, reopened, rescheduled, marked done or
+ * failed, reviewed or messaged (`TASK_SUSPENDED`). Nothing is rewritten on
+ * suspend, so lifting it restores the task exactly as it was. Both reasons can
+ * apply at once; each is lifted on its own.
+ */
+export type TaskSuspension = {
+  /**
+   * Slashie suspended the task. Only ops lift it: tell the owner to contact
+   * support. It cannot be reopened.
+   */
+  bySlashie: Scalars['Boolean']['output'];
+  /** The poster's account is suspended. Lifted when ops re-enable the account. */
+  posterSuspended: Scalars['Boolean']['output'];
+};
+
+/** Which suspension a `TASK_SUSPENDED` or `TASK_UNSUSPENDED` line set or lifted. */
+export enum TaskSuspensionReason {
+  /** The poster's account was suspended or re-enabled. */
+  PosterSuspended = 'POSTER_SUSPENDED',
+  /** Slashie (ops) suspended or unsuspended the task. */
+  Slashie = 'SLASHIE'
+}
+
+/**
  * One line of a task's activity log: what happened, who did it, and when.
  * `Task.timeline` decides per viewer which lines they get and who they see.
  */
 export type TaskTimelineEvent = {
   /**
    * Who did it. Null when the viewer may not know (another worker's quote
-   * event, the booked line, an ops edit), and when nobody did
+   * event, the booked line, an ops edit, a suspension line), and when nobody did
    * (`QUOTE_NOT_SELECTED`, `CANCELLATION_LAPSED`, an automatic
    * `ORDER_COMPLETED`).
    */
@@ -2806,6 +2986,11 @@ export type TaskTimelineEvent = {
    * @deprecated Use `changedFields`.
    */
   data: Scalars['JSON']['output'];
+  /**
+   * `TASK_SUSPENDED` and `TASK_UNSUSPENDED`: which suspension was set or
+   * lifted. Null for every other type.
+   */
+  suspensionReason?: Maybe<TaskSuspensionReason>;
   timestamp: Scalars['DateTime']['output'];
   type: TaskTimelineEventType;
   /**
@@ -2872,6 +3057,21 @@ export enum TaskTimelineEventType {
   TaskCancelled = 'TASK_CANCELLED',
   /** The poster posted the task. */
   TaskCreated = 'TASK_CREATED',
+  /**
+   * The poster reopened the task for quotes (`reopenTask`): a cancelled task, or
+   * a booking whose worker's account is suspended.
+   */
+  TaskReopened = 'TASK_REOPENED',
+  /**
+   * The task was suspended (`suspensionReason`). No actor. Only the owner, ops
+   * and the task's parties get this line.
+   */
+  TaskSuspended = 'TASK_SUSPENDED',
+  /**
+   * A suspension was lifted (`suspensionReason`); the task may still be
+   * suspended for the other reason. Same visibility as `TASK_SUSPENDED`.
+   */
+  TaskUnsuspended = 'TASK_UNSUSPENDED',
   /** The task was edited (`changedFields`). */
   TaskUpdated = 'TASK_UPDATED'
 }
@@ -2883,16 +3083,18 @@ export enum TaskTimelineEventType {
 export type Thread = {
   /**
    * The next step waiting on the viewer. Null when nothing is waiting, including
-   * on a system thread and for a worker who was not awarded the task.
+   * on a system thread, for a worker who was not awarded the task, and while
+   * the task or the other party on the booking is suspended.
    */
   attention?: Maybe<ThreadAttention>;
   /** The viewer blocked `otherParty`. */
   blockedByMe: Scalars['Boolean']['output'];
   /**
    * True when the viewer may `sendMessage` here: they are the owner or the
-   * accepted worker, a quote was accepted (or an order exists), and neither has
-   * blocked the other. Once unlocked it stays unlocked, also after completion or
-   * cancellation.
+   * booked worker, a quote was accepted (or an order exists), neither has
+   * blocked the other, and nothing is suspended (the task, or either account).
+   * Once unlocked it stays unlocked, also after completion or cancellation. On a
+   * reopened task the pair is the owner and the latest booked worker.
    */
   canSend: Scalars['Boolean']['output'];
   createdAt: Scalars['DateTime']['output'];
@@ -2946,7 +3148,8 @@ export type ThreadItem = {
   orderId?: Maybe<Scalars['ID']['output']>;
   /**
    * The quote a quote flash is about (`QUOTE_RECEIVED`, `QUOTE_ACCEPTED`,
-   * `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`): price, message,
+   * `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`, and the
+   * worker's `TASK_CANCELLED` / `TASK_REOPENED`): price, message,
    * slots, worker and its current `status`, read live. Only for the task owner
    * and the quoting worker; null otherwise and for other flashes. The owner can
    * act on a PENDING quote straight from the thread with `acceptQuote` (pick a
@@ -3039,6 +3242,7 @@ export type UpdateMyProfileInput = {
 };
 
 export type UpdateMySettingsInput = {
+  hideTaskPostingNotice?: InputMaybe<Scalars['Boolean']['input']>;
   isProfilePrivate?: InputMaybe<Scalars['Boolean']['input']>;
   language?: InputMaybe<UserLanguage>;
   marketingEmails?: InputMaybe<Scalars['Boolean']['input']>;
@@ -3184,7 +3388,8 @@ export type User = {
   savedWorkers: Array<Worker>;
   /**
    * Owner (`me`) and admin only. Every other viewer gets the default shell
-   * (`isProfilePrivate: true`, `marketingEmails: false`, default language).
+   * (`isProfilePrivate: true`, `marketingEmails: false`,
+   * `hideTaskPostingNotice: false`, default language).
    */
   settings: UserSettings;
   /**
@@ -3199,7 +3404,10 @@ export type User = {
    * included. Empty shell for every other viewer.
    */
   taskAchievements: MyTasksAchievements;
-  /** Tasks the user posted. */
+  /**
+   * Tasks the user posted. For anyone but the user and ops, suspended tasks are
+   * left out.
+   */
   tasksPosted: Array<Task>;
   /**
    * Messages inbox: task threads and the Slashie system thread this user takes
@@ -3251,6 +3459,11 @@ export type UserPage = {
 };
 
 export type UserSettings = {
+  /**
+   * Owner chose not to see the allowed-task notice on Post a task again.
+   * Missing on older accounts, which still see the notice.
+   */
+  hideTaskPostingNotice: Scalars['Boolean']['output'];
   isProfilePrivate: Scalars['Boolean']['output'];
   language: UserLanguage;
   marketingEmails: Scalars['Boolean']['output'];
@@ -3524,10 +3737,14 @@ export type Worker = {
   bio?: Maybe<Scalars['String']['output']>;
   /**
    * Completed platform jobs, newest first. `first` limits the page (at most 100).
-   * Omit it to return every row.
+   * Omit it to return every row. Jobs on a suspended task are left out while it
+   * is suspended.
    */
   completedJobs: Array<WorkerCompletedJob>;
-  /** Completed platform jobs, including rows past `first`. */
+  /**
+   * Completed platform jobs, including rows past `first` and jobs on suspended
+   * tasks (which `completedJobs` leaves out).
+   */
   completedJobsCount: Scalars['Int']['output'];
   /** Reference earnings summary (not payouts). Viewer must be the worker. */
   earnings: WorkerEarnings;
@@ -3662,11 +3879,11 @@ export type MeQuery = { me: { id: string, email: string, emailVerified: boolean,
 
 export type UserAdminFieldsFragment = { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null };
 
-export type TaskListFieldsFragment = { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null };
+export type TaskListFieldsFragment = { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null };
 
 export type WorkerAdminFieldsFragment = { id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } };
 
-export type AdminTaskDossierFieldsFragment = { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> };
+export type AdminTaskDossierFieldsFragment = { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, workerSuspended: boolean, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> };
 
 export type AdminTasksQueryVariables = Exact<{
   filter?: InputMaybe<AdminTaskFilter>;
@@ -3675,14 +3892,14 @@ export type AdminTasksQueryVariables = Exact<{
 }>;
 
 
-export type AdminTasksQuery = { adminTasks: { nextCursor?: string | null, items: Array<{ id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }> } };
+export type AdminTasksQuery = { adminTasks: { nextCursor?: string | null, items: Array<{ id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }> } };
 
 export type AdminTaskQueryVariables = Exact<{
   id: Scalars['ID']['input'];
 }>;
 
 
-export type AdminTaskQuery = { adminTask: { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> } };
+export type AdminTaskQuery = { adminTask: { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, workerSuspended: boolean, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> } };
 
 export type AdminUsersQueryVariables = Exact<{
   search?: InputMaybe<Scalars['String']['input']>;
@@ -3711,7 +3928,15 @@ export type AdminUpdateTaskMutationVariables = Exact<{
 }>;
 
 
-export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null } };
+export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null } };
+
+export type AdminSetTaskSuspendedMutationVariables = Exact<{
+  id: Scalars['ID']['input'];
+  suspended: Scalars['Boolean']['input'];
+}>;
+
+
+export type AdminSetTaskSuspendedMutation = { adminSetTaskSuspended: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, suspension?: { bySlashie: boolean, posterSuspended: boolean } | null, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null } };
 
 export type AdminUpdateUserMutationVariables = Exact<{
   id: Scalars['ID']['input'];

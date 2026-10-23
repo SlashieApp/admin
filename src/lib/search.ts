@@ -7,7 +7,8 @@ export type AdminTaskFilter = {
   search?: string
   id?: string
   status?: string[]
-  hidden?: boolean
+  /** Suspended for any reason (`Task.suspension`), or not suspended at all. */
+  suspended?: boolean
   category?: string
   posterSearch?: string
   budgetMin?: number

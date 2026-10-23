@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
+import { ConfirmAction } from '@/components/ConfirmAction'
 import { PostHogAnalytics } from '@/components/PostHogAnalytics'
 import {
   AdminSetUserDisabled,
@@ -13,6 +14,7 @@ import {
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatWhen } from '@/lib/dossier'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
+import { userDisabledConfirm, userDisabledResult } from '@/lib/suspension'
 import {
   buildAdminUpdateUserInput,
   isWorkerUser,
@@ -113,7 +115,7 @@ export function UserDetail({ userId }: { userId: string }) {
       const updated = result.data?.adminSetUserDisabled
       if (!updated) throw new Error('adminSetUserDisabled returned no user')
       setUser((current) => current && { ...current, ...updated })
-      setSaveOk(nextDisabled ? 'User disabled.' : 'User re-enabled.')
+      setSaveOk(userDisabledResult(nextDisabled))
     } catch (err) {
       setSaveError(graphqlErrorMessage(err))
     } finally {
@@ -320,18 +322,13 @@ export function UserDetail({ userId }: { userId: string }) {
           <button className="btn btn-primary" type="submit" disabled={saving}>
             {saving ? 'Saving…' : 'Save user'}
           </button>
-          <button
-            className="btn btn-danger"
-            type="button"
-            disabled={toggling}
-            onClick={() => void onToggleDisabled()}
-          >
-            {toggling
-              ? 'Updating…'
-              : user.disabled
-                ? 'Re-enable user'
-                : 'Disable user'}
-          </button>
+          <ConfirmAction
+            danger
+            label={user.disabled ? 'Re-enable user' : 'Disable user'}
+            confirmText={userDisabledConfirm(!user.disabled)}
+            busy={toggling}
+            onConfirm={() => void onToggleDisabled()}
+          />
         </form>
       </div>
 

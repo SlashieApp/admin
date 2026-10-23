@@ -12,15 +12,19 @@ import {
   parseOptionalString,
   parsePageSize,
   parseSortDir,
+  parseTriState,
   setParam,
   sortRows,
+  triStateToParam,
   type SortDir,
+  type TriState,
 } from '@/lib/listParams'
 import {
   DEFAULT_ADMIN_PAGE_SIZE,
   toAdminTaskListVariables,
   type AdminTaskListVariables,
 } from '@/lib/search'
+import { isTaskSuspended, type TaskSuspensionState } from '@/lib/suspension'
 
 export const TASK_STATUSES = [
   'DRAFT',
@@ -33,13 +37,13 @@ export const TASK_BUDGET_TYPES = ['ONE_OFF', 'PER_DAY', 'PER_HOUR'] as const
 
 export type TaskStatusValue = (typeof TASK_STATUSES)[number]
 export type TaskStatusFilter = TaskStatusValue | 'ALL'
-export type TaskVisibilityFilter = 'all' | 'public' | 'hidden'
 export type TaskBudgetTypeFilter = (typeof TASK_BUDGET_TYPES)[number] | 'ALL'
 
 export type TaskListFilters = {
   q: string
   status: TaskStatusFilter
-  visibility: TaskVisibilityFilter
+  /** Suspended for any reason: any / yes / no (`AdminTaskFilter.suspended`). */
+  suspended: TriState
   category: string
   poster: string
   budgetMin: number | null
@@ -61,7 +65,8 @@ export type TaskListRow = {
   categories: readonly string[]
   status: string
   views?: number | null
-  hidden?: boolean | null
+  /** Null when the task is not suspended (BE-108). */
+  suspension?: TaskSuspensionState | null
   budget?: {
     amount?: number | null
     currency?: string | null
@@ -78,7 +83,7 @@ export type TaskListRow = {
 const EMPTY_FILTERS: TaskListFilters = {
   q: '',
   status: 'ALL',
-  visibility: 'all',
+  suspended: 'all',
   category: '',
   poster: '',
   budgetMin: null,
@@ -101,13 +106,6 @@ export function parseTaskStatusFilter(
     : 'ALL'
 }
 
-export function parseTaskVisibilityFilter(
-  value: string | null | undefined,
-): TaskVisibilityFilter {
-  if (value === 'hidden' || value === 'public') return value
-  return 'all'
-}
-
 export function parseTaskBudgetTypeFilter(
   value: string | null | undefined,
 ): TaskBudgetTypeFilter {
@@ -124,7 +122,7 @@ export function taskFiltersFromForm(
     ...current,
     q: String(data.get('q') ?? '').trim(),
     status: parseTaskStatusFilter(String(data.get('status') ?? '')),
-    visibility: parseTaskVisibilityFilter(String(data.get('visibility') ?? '')),
+    suspended: parseTriState(String(data.get('suspended') ?? '')),
     category: String(data.get('category') ?? '').trim(),
     poster: String(data.get('poster') ?? '').trim(),
     budgetMin: parseOptionalNumber(String(data.get('budgetMin') ?? '')),
@@ -142,7 +140,7 @@ export function parseTaskListFilters(
   return {
     q: parseOptionalString(params.get('q')),
     status: parseTaskStatusFilter(params.get('status')),
-    visibility: parseTaskVisibilityFilter(params.get('visibility')),
+    suspended: parseTriState(params.get('suspended')),
     category: parseOptionalString(params.get('category')),
     poster: parseOptionalString(params.get('poster')),
     budgetMin: parseOptionalNumber(params.get('budgetMin')),
@@ -169,8 +167,7 @@ export function toTaskListQueryVariables(
     ...vars.filter,
   }
   if (filters.status !== 'ALL') extras.status = [filters.status]
-  if (filters.visibility === 'hidden') extras.hidden = true
-  if (filters.visibility === 'public') extras.hidden = false
+  if (filters.suspended !== 'all') extras.suspended = filters.suspended === 'yes'
   if (filters.category) extras.category = filters.category
   if (filters.poster) extras.posterSearch = filters.poster
   if (filters.budgetMin != null) extras.budgetMin = filters.budgetMin
@@ -204,8 +201,8 @@ export function taskSortValue(row: TaskListRow, key: string): unknown {
       return row.poster?.profile?.name || row.poster?.email || ''
     case 'budget':
       return row.budget?.amount ?? -1
-    case 'visibility':
-      return row.hidden ? 'hidden' : 'public'
+    case 'suspended':
+      return isTaskSuspended(row.suspension) ? 1 : 0
     case 'views':
       return row.views ?? 0
     case 'date':
@@ -222,7 +219,8 @@ export function taskListPath(
   const params = new URLSearchParams()
   setParam(params, 'q', next.q)
   if (next.status !== 'ALL') params.set('status', next.status)
-  if (next.visibility !== 'all') params.set('visibility', next.visibility)
+  const suspended = triStateToParam(next.suspended)
+  if (suspended) params.set('suspended', suspended)
   setParam(params, 'category', next.category)
   setParam(params, 'poster', next.poster)
   if (next.budgetMin != null) params.set('budgetMin', String(next.budgetMin))

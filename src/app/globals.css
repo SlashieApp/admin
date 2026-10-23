@@ -661,6 +661,30 @@ select.input {
   background: #e4f7ee;
 }
 
+.pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.confirm-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm-panel p {
+  margin: 0;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .filter-block {
   display: flex;
   flex-direction: column;

@@ -9,13 +9,12 @@ import {
 } from './taskInput'
 
 describe('taskToFormValues + buildAdminUpdateTaskInput', () => {
-  it('round-trips god-mode fields including hide', () => {
+  it('round-trips god-mode fields', () => {
     const values = taskToFormValues({
       title: 'Fix tap',
       description: 'Kitchen leak',
       categories: ['Plumbing', 'Leaky tap'],
       status: 'OPEN',
-      hidden: true,
       location: {
         name: 'Clapham',
         address: '1 High St',
@@ -35,7 +34,6 @@ describe('taskToFormValues + buildAdminUpdateTaskInput', () => {
       description: 'Kitchen leak',
       categories: ['Plumbing', 'Leaky tap'],
       status: 'OPEN',
-      hidden: true,
       location: {
         lat: 51.46,
         lng: -0.14,
@@ -59,7 +57,19 @@ describe('taskToFormValues + buildAdminUpdateTaskInput', () => {
     })
     expect(buildAdminUpdateTaskInput(values).location).toBeUndefined()
     expect(buildAdminUpdateTaskInput(values).budget).toBeUndefined()
-    expect(buildAdminUpdateTaskInput(values).hidden).toBe(false)
+  })
+
+  it('never sends the deprecated hidden flag (suspend with adminSetTaskSuspended)', () => {
+    // A suspended task as the API returns it must not leak into the update input.
+    const suspendedTask = {
+      title: 'Fix tap',
+      description: 'Kitchen leak',
+      status: 'OPEN',
+      suspension: { bySlashie: true, posterSuspended: false },
+    }
+    const values = taskToFormValues(suspendedTask)
+    expect(buildAdminUpdateTaskInput(values)).not.toHaveProperty('hidden')
+    expect(values).not.toHaveProperty('hidden')
   })
 })
 

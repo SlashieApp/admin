@@ -86,7 +86,7 @@ type Admin
 }
 
 """
-Ops search across all tasks (including hidden, cancelled, and non-OPEN).
+Ops search across all tasks (including suspended, cancelled, and non-OPEN).
 """
 input AdminTaskFilter {
   """
@@ -103,9 +103,14 @@ input AdminTaskFilter {
   """
   status: [TaskStatus!]
   """
-  When set, only hidden or only visible tasks.
+  When set, only tasks suspended by Slashie, or only tasks that are not.
   """
-  hidden: Boolean
+  hidden: Boolean @deprecated(reason: "Use `suspended`.")
+  """
+  When set, only suspended tasks (for any reason, see `Task.suspension`), or
+  only tasks that are not suspended.
+  """
+  suspended: Boolean
   """
   Tasks that have this category: case-insensitive exact match on any of
   `categories` (same rule as public `TaskFilter.category`).
@@ -189,9 +194,11 @@ input AdminUpdateTaskInput {
   datetime: TaskDateTimeInput
   status: TaskStatus
   """
-  Hide from public discovery (`Query.tasks`) without cancelling the task.
+  True suspends the task by Slashie, false lifts that; the same as
+  `adminSetTaskSuspended` (it logs `TASK_SUSPENDED` / `TASK_UNSUSPENDED`, not
+  a `TASK_UPDATED` line). A value that matches the task changes nothing.
   """
-  hidden: Boolean
+  hidden: Boolean @deprecated(reason: "Use `adminSetTaskSuspended`.")
   preferredContactMethod: TaskContactMethod
 }
 
@@ -224,9 +231,12 @@ type AdminTaskActivity {
 
 """
 Everything related to one task for ops. Prefer this over stitching public queries.
-Task is owner-shaped so location/address/hidden are visible. Quotes always
-come with the quoting worker (`Quote.workerUserId`, and `Quote.worker`
-including the email).
+Task is owner-shaped so location/address and both suspension reasons
+(`task.suspension`) are visible. Quotes always come with the quoting worker
+(`Quote.workerUserId`, and `Quote.worker` including the email). Suspensions
+and their lifting are `TIMELINE` activity rows (`TASK_SUSPENDED`,
+`TASK_UNSUSPENDED`) whose `body` holds the reason and whose `actorUserId` is
+the admin who did it.
 """
 type AdminTaskDossier {
   task: Task!
@@ -304,7 +314,7 @@ type AdminOpsSummary {
   """
   newUsers: AdminOpsMetric!
   """
-  Tasks with `createdAt` in the window (all statuses, including hidden/drafts).
+  Tasks with `createdAt` in the window (all statuses, including suspended/drafts).
   """
   tasksCreated: AdminOpsMetric!
   """
@@ -343,7 +353,9 @@ type AdminOpsSummary {
   """
   openReports: Int!
   """
-  Point-in-time: tasks with `hidden: true`.
+  Point-in-time: tasks suspended by Slashie (`Task.suspension.bySlashie`).
+  Tasks suspended only because the poster's account is suspended are not
+  counted.
   """
   hiddenTasks: Int!
   """
@@ -473,13 +485,29 @@ extend type Mutation {
   """
   adminUpdateTask(id: ID!, input: AdminUpdateTaskInput!): Task! @admin
   """
+  Suspend a task by Slashie, or lift that suspension (BE-108). See
+  `TaskSuspension`: the task leaves every public list, non-parties get
+  `NOT_FOUND`, and everything on it is frozen. Lifting it leaves a suspension
+  because the poster's account is suspended in place. Logs `TASK_SUSPENDED` /
+  `TASK_UNSUSPENDED` (reason `SLASHIE`); a call that changes nothing logs
+  nothing. Throws `TASK_NOT_FOUND`.
+  """
+  adminSetTaskSuspended(id: ID!, suspended: Boolean!): Task! @admin
+  """
   God-mode user update for ops. Safe fields only (name, contact, verification).
   """
   adminUpdateUser(id: ID!, input: AdminUpdateUserInput!): User! @admin
   """
-  Disable or re-enable a marketplace account. Login still succeeds and
-  returns `user.disabled: true`. `@auth` actions (except `Query.me`) throw
+  Disable (suspend) or re-enable a marketplace account. Login still succeeds
+  and returns `user.disabled: true`. `@auth` actions (except `Query.me`) throw
   `ACCOUNT_DISABLED`. Password-reset tokens are cleared on disable.
+
+  Disabling also suspends every task the user posted
+  (`Task.suspension.posterSuspended`, logged `TASK_SUSPENDED` with reason
+  `POSTER_SUSPENDED`) and freezes their quotes and bookings on other people's
+  tasks (`COUNTERPARTY_SUSPENDED` for the other party). Re-enabling lifts the
+  poster suspension (`TASK_UNSUSPENDED`) but not a suspension by Slashie.
+  Nothing else is rewritten either way.
   """
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User! @admin
   """
@@ -748,6 +776,16 @@ enum FlashKind {
   """
   REVIEW_PROMPT
   """
+  The owner cancelled the task. Each worker with a pending quote gets one,
+  carrying their quote (still PENDING, so a reopen can bring it back).
+  """
+  TASK_CANCELLED
+  """
+  The owner reopened the task (`reopenTask`). Each worker whose quote is
+  pending again gets one, carrying their quote.
+  """
+  TASK_REOPENED
+  """
   Ops announcement in the `SYSTEM` thread.
   """
   SYSTEM_ANNOUNCEMENT
@@ -862,9 +900,10 @@ type Thread
   unreadCount: Int!
   """
   True when the viewer may `sendMessage` here: they are the owner or the
-  accepted worker, a quote was accepted (or an order exists), and neither has
-  blocked the other. Once unlocked it stays unlocked, also after completion or
-  cancellation.
+  booked worker, a quote was accepted (or an order exists), neither has
+  blocked the other, and nothing is suspended (the task, or either account).
+  Once unlocked it stays unlocked, also after completion or cancellation. On a
+  reopened task the pair is the owner and the latest booked worker.
   """
   canSend: Boolean!
   """
@@ -873,7 +912,8 @@ type Thread
   blockedByMe: Boolean!
   """
   The next step waiting on the viewer. Null when nothing is waiting, including
-  on a system thread and for a worker who was not awarded the task.
+  on a system thread, for a worker who was not awarded the task, and while
+  the task or the other party on the booking is suspended.
   """
   attention: ThreadAttention
   createdAt: DateTime! @column(overrideType: "Date")
@@ -921,7 +961,8 @@ type ThreadItem
   quoteId: ID
   """
   The quote a quote flash is about (`QUOTE_RECEIVED`, `QUOTE_ACCEPTED`,
-  `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`): price, message,
+  `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`, and the
+  worker's `TASK_CANCELLED` / `TASK_REOPENED`): price, message,
   slots, worker and its current `status`, read live. Only for the task owner
   and the quoting worker; null otherwise and for other flashes. The owner can
   act on a PENDING quote straight from the thread with `acceptQuote` (pick a
@@ -1076,7 +1117,8 @@ extend type Mutation {
   Errors: `MESSAGE_EMPTY`, `MESSAGE_TOO_LONG` (2000 characters), `FORBIDDEN`
   (not the owner or accepted worker, or a system thread), `MESSAGE_LOCKED` (no
   accepted quote yet), `MESSAGE_BLOCKED` (either side blocked the other),
-  `MESSAGE_RATE_LIMITED`.
+  `MESSAGE_RATE_LIMITED`, `TASK_SUSPENDED`, `COUNTERPARTY_SUSPENDED` (the
+  other party's account is suspended).
   """
   sendMessage(threadId: ID!, body: String!): ThreadItem! @auth
   """
@@ -1267,6 +1309,16 @@ type OrderCloseAction {
   failedReason: OrderFailedReason
 }
 
+"""
+A booking: one per accepted quote. A reopened task (`reopenTask`) can have
+more than one; `Task.orders` lists them newest first.
+
+Every order mutation is refused while the booking is frozen (BE-108):
+`TASK_SUSPENDED` when its task is suspended, `COUNTERPARTY_SUSPENDED` when the
+other party's account is suspended, `ACCOUNT_DISABLED` when the caller's is.
+The 7-day auto-Done and the lapse of a cancellation request wait too, and
+apply once nothing is suspended.
+"""
 type Order
   @entity(
     additionalFields: [
@@ -1323,6 +1375,34 @@ type Order
   closedAt: DateTime
   createdAt: DateTime! @column(overrideType: "Date")
   task: Task!
+  """
+  Set when the other party's account is suspended (BE-108), for the order's
+  two parties only; null otherwise. The booking is frozen, not cancelled:
+  every order mutation throws `COUNTERPARTY_SUSPENDED` for the viewer until
+  ops lift the suspension, which restores it exactly as it was.
+  """
+  counterpartySuspension: OrderCounterpartySuspension
+}
+
+"""
+The other party on a booking has a suspended account (BE-108).
+"""
+type OrderCounterpartySuspension {
+  """
+  Who is suspended: `WORKER` when the viewer is the customer, `CUSTOMER` when
+  the viewer is the worker.
+  """
+  role: OrderPartyRole!
+  """
+  Their public display name, for "{name}'s account has been suspended".
+  """
+  name: String!
+  """
+  True when the viewer may `reopenTask` to end this booking and take quotes
+  again: the customer, while the booking is live and the task is not itself
+  suspended. Always false for the worker, who only gets the notice.
+  """
+  canReopen: Boolean!
 }
 
 input MyOrdersFilter {
@@ -1500,6 +1580,13 @@ type Quote
   proposedSlots: [TimeSlot!]!
   status: QuoteStatus! @column
   createdAt: DateTime! @column(overrideType: "Date")
+  """
+  True when the quoting worker's account is suspended (BE-108): the quote is
+  frozen, so it cannot be accepted or declined (`COUNTERPARTY_SUSPENDED`)
+  until ops lift the suspension. Only for viewers who get `worker`; false for
+  everyone else.
+  """
+  workerSuspended: Boolean!
 }
 
 input AddQuoteInput {
@@ -1522,6 +1609,8 @@ extend type Mutation {
   Unlimited and Pro memberships bypass the cap.
   Blocked while this worker has an ACCEPTED quote on the task.
   Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
+  A suspended task: `TASK_SUSPENDED` for a worker who already quoted on it,
+  `TASK_NOT_FOUND` for anyone else.
   """
   addQuote(input: AddQuoteInput!): Quote! @auth
   """
@@ -1530,12 +1619,14 @@ extend type Mutation {
   get a `QUOTE_WITHDRAWN` flash. Accepted quotes cannot be withdrawn. The task
   drops out of the worker pipeline and `Task.quotes`, and stops counting toward
   the monthly quote limit. A later `addQuote` inserts a new PENDING row.
+  Suspended task: `TASK_SUSPENDED`.
   """
   withdrawQuote(quoteId: ID!): Quote! @auth
   """
   Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
   Works from Messages with a flash's `quoteId`. Raises `QUOTE_DECLINED` with the
-  quote.
+  quote. Errors include `TASK_SUSPENDED` and `COUNTERPARTY_SUSPENDED` (the
+  quoting worker's account is suspended).
   """
   declineQuote(quoteId: ID!): Quote! @auth
 }
@@ -1727,7 +1818,8 @@ What the signed-in party can see and do for reviews on one order.
 """
 type OrderReviewState {
   """
-  True when this party is on a COMPLETED order and has not used their one review.
+  True when this party is on a COMPLETED order and has not used their one
+  review. False while the booking is frozen by a suspension (BE-108).
   """
   canSubmit: Boolean!
   """
@@ -1835,6 +1927,9 @@ extend type Mutation {
   """
   Submit the caller's one review for a COMPLETED order. Open to either party,
   not a founding cohort. Rate-limited to 10 reviews per account per UTC day.
+  `createReview`, `updateReview` and `hideReview` are refused while the
+  booking is frozen (BE-108): `TASK_SUSPENDED` (its task is suspended) or
+  `COUNTERPARTY_SUSPENDED` (the other party's account is).
   """
   createReview(input: CreateReviewInput!): Review! @auth
   """
@@ -1881,7 +1976,7 @@ extend type Mutation {
   (GPS included) removed. Replaces any earlier photo in that slot. Task poster
   only, while the task is OPEN or DRAFT. Errors: `UPLOAD_NOT_FOUND`,
   `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `INVALID_INDEX`, `TASK_NOT_FOUND`,
-  `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`.
+  `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`, `TASK_SUSPENDED`.
   """
   finalizeTaskImage(taskId: ID!, index: Int!, uploadKey: String!): String! @auth
   """
@@ -2058,6 +2153,10 @@ type Task
         path: "timeline"
         type: "{ type: string, timestamp: Date, actorUserId: IdDoc['_id'] | null, workerUserId: IdDoc['_id'] | null, quoteId: IdDoc['_id'] | null, orderId: IdDoc['_id'] | null, data: Record<string, unknown> }[]"
       }
+      # Suspension (BE-108), see `TaskSuspension`. One timestamp per reason so
+      # lifting one leaves the other. Missing or null: not suspended.
+      { path: "suspendedBySlashieAt?", type: "Date | null" }
+      { path: "posterSuspendedAt?", type: "Date | null" }
     ]
   )
 {
@@ -2096,10 +2195,17 @@ type Task
   """
   status: TaskStatus! @column
   """
-  When true, the task is hidden from public map discovery. Set by ops via
-  `adminUpdateTask`.
+  True when Slashie suspended the task (`suspension.bySlashie`). False when it
+  is suspended only because the poster's account is suspended.
   """
-  hidden: Boolean! @column
+  hidden: Boolean! @deprecated(reason: "Use `suspension.bySlashie`.")
+  """
+  Why the task is suspended, for its owner, its parties (workers with a quote
+  or a booking on it) and ops. Null when it is not suspended. Nobody else can
+  reach a suspended task: it is in no public list, and `task(id)` throws
+  `NOT_FOUND` for them.
+  """
+  suspension: TaskSuspension
   """
   When the task row was created. Persisted on `createTask`.
   """
@@ -2109,9 +2215,12 @@ type Task
   the viewer when read. Chat messages are not events.
   - Task owner, and ops through the admin queries: every event, with
     `actor` and `worker`.
+  - Suspension lines (`TASK_SUSPENDED`, `TASK_UNSUSPENDED`) only for the
+    owner, ops and the task's parties (workers with a quote or a booking on
+    it), never with an `actor`.
   - Everyone else, guests included:
-    - task created, edited and cancelled, with the poster as `actor` (an ops
-      edit has no `actor`);
+    - task created, edited, cancelled and reopened, with the poster as
+      `actor` (an ops edit has no `actor`);
     - every quote event, without `actor` or `worker`, unless it is about the
       viewer's own quote. `QUOTE_ACCEPTED` is the "booked" line;
     - booking events (reschedule and cancellation requests and their
@@ -2162,6 +2271,41 @@ type Task
 }
 
 """
+Why a task is suspended (BE-108). A suspended task is frozen, not deleted: it
+is in no public list, only its owner and parties (workers with a quote or a
+booking on it) can open it, and nothing on it can be quoted, accepted,
+declined, withdrawn, edited, cancelled, reopened, rescheduled, marked done or
+failed, reviewed or messaged (`TASK_SUSPENDED`). Nothing is rewritten on
+suspend, so lifting it restores the task exactly as it was. Both reasons can
+apply at once; each is lifted on its own.
+"""
+type TaskSuspension {
+  """
+  Slashie suspended the task. Only ops lift it: tell the owner to contact
+  support. It cannot be reopened.
+  """
+  bySlashie: Boolean!
+  """
+  The poster's account is suspended. Lifted when ops re-enable the account.
+  """
+  posterSuspended: Boolean!
+}
+
+"""
+Which suspension a `TASK_SUSPENDED` or `TASK_UNSUSPENDED` line set or lifted.
+"""
+enum TaskSuspensionReason {
+  """
+  Slashie (ops) suspended or unsuspended the task.
+  """
+  SLASHIE
+  """
+  The poster's account was suspended or re-enabled.
+  """
+  POSTER_SUSPENDED
+}
+
+"""
 One line of a task's activity log: what happened, who did it, and when.
 `Task.timeline` decides per viewer which lines they get and who they see.
 """
@@ -2170,7 +2314,7 @@ type TaskTimelineEvent {
   timestamp: DateTime! @column(overrideType: "Date")
   """
   Who did it. Null when the viewer may not know (another worker's quote
-  event, the booked line, an ops edit), and when nobody did
+  event, the booked line, an ops edit, a suspension line), and when nobody did
   (`QUOTE_NOT_SELECTED`, `CANCELLATION_LAPSED`, an automatic
   `ORDER_COMPLETED`).
   """
@@ -2188,6 +2332,11 @@ type TaskTimelineEvent {
   `TASK_UPDATED`: the fields that changed. Empty for every other type.
   """
   changedFields: [TaskEditableField!]!
+  """
+  `TASK_SUSPENDED` and `TASK_UNSUSPENDED`: which suspension was set or
+  lifted. Null for every other type.
+  """
+  suspensionReason: TaskSuspensionReason
   """
   `TASK_UPDATED`: `{ fields }` with the changed field names, plus
   `admin: true` for an ops edit. `{}` for every other type.
@@ -2214,6 +2363,21 @@ enum TaskTimelineEventType {
   The poster cancelled the task before anyone was booked.
   """
   TASK_CANCELLED
+  """
+  The poster reopened the task for quotes (`reopenTask`): a cancelled task, or
+  a booking whose worker's account is suspended.
+  """
+  TASK_REOPENED
+  """
+  The task was suspended (`suspensionReason`). No actor. Only the owner, ops
+  and the task's parties get this line.
+  """
+  TASK_SUSPENDED
+  """
+  A suspension was lifted (`suspensionReason`); the task may still be
+  suspended for the other reason. Same visibility as `TASK_SUSPENDED`.
+  """
+  TASK_UNSUSPENDED
   """
   A worker sent a quote.
   """
@@ -2300,7 +2464,8 @@ enum TaskTimelineEventType {
 
 """
 A task field that an edit can change. `STATUS` and `HIDDEN` only change in an
-ops edit.
+ops edit. `HIDDEN` is only on edits logged before BE-108: hiding a task is now
+a suspension (`TASK_SUSPENDED`).
 """
 enum TaskEditableField {
   TITLE
@@ -2518,8 +2683,9 @@ enum SortDirection {
 
 extend type Query {
   """
-  Open tasks for discovery (map and search). Center defaults to London. No radius
-  limit unless `filter.radiusMiles` is passed. Nearest first by default.
+  Open tasks for discovery (map and search), never suspended ones. Center
+  defaults to London. No radius limit unless `filter.radiusMiles` is passed.
+  Nearest first by default.
   `filter.status`, `filter.ownerUserId`, and `filter.hubSection` are ignored (always OPEN-only).
   `Task.location` is discovery-style on map browse.
   `DISTANCE` sort requires `filter.lat` and `filter.lng`.
@@ -2538,10 +2704,15 @@ extend type Query {
   ): [Task!]!
   """
   Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
+  A cancelled or suspended task (`Task.suspension`) is only for its owner and
+  parties (workers with a quote, any status, or a booking on it), so the
+  `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A finished booking is
+  only for its customer and worker. Everyone else, guests included, gets
+  `NOT_FOUND`.
   """
   task(id: ID!): Task
   """
-  Most-used categories on open, visible tasks, most used first: suggestions
+  Most-used categories on open tasks that are not suspended, most used first: suggestions
   for the create-task category input. Grouped ignoring case; each shows its
   most common spelling. `first` defaults to 12, capped at 50. Anonymous OK.
   """
@@ -2556,20 +2727,44 @@ extend type Mutation {
   """
   Amend an existing task owned by the current user. Only allowed while the task
   is `OPEN`/`DRAFT`; partial update (only provided fields change).
+  Suspended: `TASK_SUSPENDED`.
   """
   updateTask(taskId: ID!, input: UpdateTaskInput!): Task! @auth
   """
-  Cancel an open task owned by the current user. Errors:
-  `TASK_HAS_ACCEPTED_QUOTE` (someone is booked), `TASK_ALREADY_CANCELLED` (a
-  repeat call; nothing more is logged), `TASK_CHANGED` (it changed while
-  cancelling; read it again).
+  Cancel an open task owned by the current user. Pending quotes stay PENDING,
+  so `reopenTask` can bring them back, but none can be accepted while the task
+  is cancelled. Each worker with a pending quote gets a `TASK_CANCELLED` flash
+  carrying their quote. Errors: `TASK_HAS_ACCEPTED_QUOTE` (someone is booked),
+  `TASK_ALREADY_CANCELLED` (a repeat call; nothing more is logged),
+  `TASK_CHANGED` (it changed while cancelling; read it again),
+  `TASK_SUSPENDED`.
   """
   cancelTask(taskId: ID!): Task! @auth
+  """
+  Reopen one of your tasks for quotes (BE-108). Two cases:
+  - A CANCELLED task goes back to OPEN. Quotes that were still PENDING can be
+    accepted again; declined and withdrawn ones stay closed.
+  - A booked task (AWARDED, live order) whose booked worker's account is
+    suspended (`Order.counterpartySuspension.canReopen`): the order becomes
+    CANCELLED (`ORDER_CANCELLED`), that worker's quote DECLINED
+    (`QUOTE_DECLINED`), the task OPEN, and the quotes that were not selected
+    PENDING again.
+  Logs `TASK_REOPENED`, and each worker whose quote is pending again gets a
+  `TASK_REOPENED` flash carrying it. Errors: `TASK_NOT_FOUND`, `FORBIDDEN`
+  (not the owner), `TASK_SUSPENDED` (a suspended task cannot be reopened),
+  `TASK_ALREADY_OPEN` (OPEN or DRAFT), `WORKER_NOT_SUSPENDED` (booked to a
+  worker whose account is active: cancel through the booking instead),
+  `TASK_NOT_REOPENABLE` (anything else, such as a finished booking),
+  `TASK_CHANGED` (it changed while reopening; read it again).
+  """
+  reopenTask(taskId: ID!): Task! @auth
   """
   Accept a worker's quote on one of its slots and create the Order (booked at that slot).
   Works from Messages with a flash's `quoteId` and a `quote.proposedSlots` id.
   Every other worker's PENDING quote becomes NOT_SELECTED, and each of them gets
-  a `QUOTE_NOT_SELECTED` flash carrying their quote.
+  a `QUOTE_NOT_SELECTED` flash carrying their quote. Errors include
+  `TASK_NOT_OPEN` (also while cancelled), `TASK_SUSPENDED`, and
+  `COUNTERPARTY_SUSPENDED` (the quoting worker's account is suspended).
   """
   acceptQuote(input: AcceptQuoteInput!): AcceptQuotePayload! @auth
 }
@@ -2607,6 +2802,7 @@ type User
       { path: "settingsPrivateProfile", type: "boolean" }
       { path: "settingsMarketingEmails", type: "boolean" }
       { path: "settingsLanguage", type: "string" }
+      { path: "settingsHideTaskPostingNotice?", type: "boolean" }
       { path: "passwordResetTokenHash", type: "string | null" }
       { path: "passwordResetExpiresAt", type: "Date | null" }
       { path: "dateOfBirth", type: "Date | null" }
@@ -2677,7 +2873,8 @@ type User
   """
   pendingPhone: String
   """
-  Tasks the user posted.
+  Tasks the user posted. For anyone but the user and ops, suspended tasks are
+  left out.
   """
   tasksPosted(filter: TaskFilter, sort: TaskSort): [Task!]!
   """
@@ -2781,7 +2978,8 @@ type User
   worker: worker
   """
   Owner (`me`) and admin only. Every other viewer gets the default shell
-  (`isProfilePrivate: true`, `marketingEmails: false`, default language).
+  (`isProfilePrivate: true`, `marketingEmails: false`,
+  `hideTaskPostingNotice: false`, default language).
   """
   settings: UserSettings!
   """
@@ -2817,6 +3015,11 @@ type UserSettings {
   isProfilePrivate: Boolean!
   marketingEmails: Boolean!
   language: UserLanguage!
+  """
+  Owner chose not to see the allowed-task notice on Post a task again.
+  Missing on older accounts, which still see the notice.
+  """
+  hideTaskPostingNotice: Boolean!
 }
 
 """
@@ -2871,7 +3074,7 @@ type PublicUser {
   createdAt: DateTime!
   """
   Tasks this user posted that are publicly discoverable: status `OPEN` and
-  not `hidden`. Newest first. Visitor-safe task fields (same redaction as
+  not suspended. Newest first. Visitor-safe task fields (same redaction as
   `Query.tasks` / public `task(id)`).
 
   `first` defaults to 10 and is capped at 20. Values below 1 are treated as 1.
@@ -3042,7 +3245,7 @@ type PublicProfile {
   memberSince: DateTime!
   """
   Tasks this user posted that are publicly discoverable: status `OPEN` and
-  not `hidden`. Newest first. Same redaction and limits as `PublicUser.openTasks`.
+  not suspended. Newest first. Same redaction and limits as `PublicUser.openTasks`.
   """
   openTasks(first: Int = 10, excludeTaskId: ID): [Task!]!
   """
@@ -3183,6 +3386,7 @@ input UpdateMySettingsInput {
   isProfilePrivate: Boolean
   marketingEmails: Boolean
   language: UserLanguage
+  hideTaskPostingNotice: Boolean
 }
 
 """
@@ -3843,11 +4047,13 @@ type worker
   serviceAreaLabel: String
   """
   Completed platform jobs, newest first. `first` limits the page (at most 100).
-  Omit it to return every row.
+  Omit it to return every row. Jobs on a suspended task are left out while it
+  is suspended.
   """
   completedJobs(first: Int): [WorkerCompletedJob!]!
   """
-  Completed platform jobs, including rows past `first`.
+  Completed platform jobs, including rows past `first` and jobs on suspended
+  tasks (which `completedJobs` leaves out).
   """
   completedJobsCount: Int!
   """

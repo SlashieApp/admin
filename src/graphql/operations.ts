@@ -76,7 +76,10 @@ const TASK_LIST_FIELDS = gql`
     categories
     status
     views
-    hidden
+    suspension {
+      bySlashie
+      posterSuspended
+    }
     datetime {
       date
       time
@@ -164,6 +167,7 @@ const ADMIN_TASK_DOSSIER = gql`
       status
       message
       createdAt
+      workerSuspended
       price {
         amount
         currency
@@ -300,6 +304,16 @@ export const AdminUpdateTask = gql`
   ${TASK_LIST_FIELDS}
   mutation AdminUpdateTask($id: ID!, $input: AdminUpdateTaskInput!) {
     adminUpdateTask(id: $id, input: $input) {
+      ...TaskListFields
+    }
+  }
+`
+
+/** Ops suspension of a task (BE-108). Replaces the deprecated `hidden` flag. */
+export const AdminSetTaskSuspended = gql`
+  ${TASK_LIST_FIELDS}
+  mutation AdminSetTaskSuspended($id: ID!, $suspended: Boolean!) {
+    adminSetTaskSuspended(id: $id, suspended: $suspended) {
       ...TaskListFields
     }
   }

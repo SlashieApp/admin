@@ -123,6 +123,17 @@ export function linkedWorkersFromDossier(input: {
   return rows
 }
 
+/**
+ * Newest first. A reopened task (BE-108) keeps the old cancelled order next to
+ * the new booking, so a task can have more than one.
+ */
+export function ordersNewestFirst<T extends { createdAt?: unknown }>(
+  orders: readonly T[] | null | undefined,
+): T[] {
+  const time = (order: T) => Date.parse(String(order.createdAt ?? '')) || 0
+  return [...(orders ?? [])].sort((a, b) => time(b) - time(a))
+}
+
 export type ActivityRow = {
   id: string
   title: string
@@ -148,15 +159,36 @@ export function timelineTitle(type: string | null | undefined): string {
   return words ? words[0].toUpperCase() + words.slice(1) : 'Activity'
 }
 
-/** `{"fields":["BUDGET","DATETIME"]}` → "Changed: budget, datetime"; other JSON as is. */
+/** `TaskSuspensionReason` values on `TASK_SUSPENDED` / `TASK_UNSUSPENDED` rows (BE-108), in words. */
+const SUSPENSION_REASONS: Record<string, string> = {
+  SLASHIE: 'suspended by Slashie',
+  POSTER_SUSPENDED: "poster's account suspended",
+}
+
+function lowerWords(value: unknown): string {
+  return String(value).toLowerCase().replace(/_/g, ' ')
+}
+
+/**
+ * Timeline `body` JSON in words:
+ * `{"fields":["BUDGET","DATETIME"]}` → "Changed: budget, datetime";
+ * `{"reason":"SLASHIE"}` → "Reason: suspended by Slashie" (or "Reason: poster's account suspended");
+ * other JSON as is.
+ */
 export function timelineBody(body: string | null | undefined): string {
   const raw = body?.trim()
   if (!raw) return ''
   try {
-    const data = JSON.parse(raw) as { fields?: unknown }
+    const data = JSON.parse(raw) as { fields?: unknown; reason?: unknown }
+    const parts: string[] = []
     if (Array.isArray(data.fields) && data.fields.length > 0) {
-      return `Changed: ${data.fields.map((field) => String(field).toLowerCase().replace(/_/g, ' ')).join(', ')}`
+      parts.push(`Changed: ${data.fields.map(lowerWords).join(', ')}`)
     }
+    if (typeof data.reason === 'string' && data.reason.trim()) {
+      const reason = data.reason.trim()
+      parts.push(`Reason: ${SUSPENSION_REASONS[reason] ?? lowerWords(reason)}`)
+    }
+    if (parts.length > 0) return parts.join(' · ')
   } catch {
     // Not JSON: show it as sent.
   }
@@ -183,9 +215,10 @@ export function activityFromDossier(
     rows.push({
       id: `${kind}-${item.type}-${item.createdAt}-${rows.length}`,
       // Timeline rows carry the raw event type as the title and JSON data as the body.
+      // A flash without a title falls back to its type in words (`TASK_REOPENED` → "Task reopened").
       title: timeline
         ? timelineTitle(item.type)
-        : item.title?.trim() || item.type || 'Activity',
+        : item.title?.trim() || timelineTitle(item.type),
       body: [timeline ? timelineBody(item.body) : item.body?.trim(), meta]
         .filter(Boolean)
         .join(' · '),

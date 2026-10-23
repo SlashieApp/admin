@@ -2,7 +2,7 @@
 
 Private ops panel for the Slashie marketplace. Google sign-in, dashboard, auto-loaded task list, user search/management, and god-mode task edits via Apollo `@admin` APIs ([BE-42](https://linear.app/slashie/issue/BE-42), [BE-43](https://linear.app/slashie/issue/BE-43), [BE-44](https://linear.app/slashie/issue/BE-44)).
 
-Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links), [FE-203](https://linear.app/slashie/issue/FE-203/fix-admin-panel-api-out-of-sync-panel-too-old).
+Tickets: [FE-156](https://linear.app/slashie/issue/FE-156/admin-panel-all-tasks-on-login-task-dossier-user-searchmanagement), [FE-157](https://linear.app/slashie/issue/FE-157/admin-dashboard-weekly-report-posthog-on-detail-pages), [FE-158](https://linear.app/slashie/issue/FE-158/admin-ui-slashie-brand-charts-mobile-responsive-layout), [FE-160](https://linear.app/slashie/issue/FE-160/admin-panel-reports-inbox-all-reported-tasks), [FE-165](https://linear.app/slashie/issue/FE-165/admin-product-feedback-inbox-draft-reply), [FE-170](https://linear.app/slashie/issue/FE-170/admin-practical-dashboard-paginated-filterable-tables-full-bleed-shell), [FE-171](https://linear.app/slashie/issue/FE-171/admin-tasks-map-pins-area-browse-task-detail-tabs-live-links), [FE-203](https://linear.app/slashie/issue/FE-203/fix-admin-panel-api-out-of-sync-panel-too-old), [FE-385](https://linear.app/slashie/issue/FE-385) (task suspension, API [BE-108](https://linear.app/slashie/issue/BE-108)).
 
 ## Stack
 
@@ -24,7 +24,7 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters. Users covers workers too (Worker filter = `isWorker`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link.
+**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters. Users covers workers too (Worker filter = `isWorker`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link and a Suspend task / Unsuspend task button.
 
 ## GraphQL
 
@@ -40,19 +40,22 @@ bun run codegen && bun run test
 
 | Operation | Used by |
 | --- | --- |
-| `adminTasks(filter: AdminTaskFilter, first, after): TaskPage` | Tasks table + map, edit form (by id) |
+| `adminTasks(filter: AdminTaskFilter, first, after): TaskPage` | Tasks table + map (filter `suspended`), edit form (by id) |
 | `adminTask(id): AdminTaskDossier` | Task dossier (task, poster, workers, quotes, orders, activity) |
 | `adminUsers(search, id, disabled, isWorker, createdAfter, createdBefore, first, after): UserPage` | Users table, user detail (with `tasksPosted`) |
-| `adminOpsSummary(range): AdminOpsSummary` | Dashboard |
+| `adminOpsSummary(range): AdminOpsSummary` | Dashboard (`hiddenTasks` is shown as "Suspended by Slashie") |
 | `popularTaskCategories(first)` | Category suggestions on the Tasks filter |
-| `adminUpdateTask`, `adminUpdateUser`, `adminSetUserDisabled` | God-mode edits |
+| `adminUpdateTask`, `adminUpdateUser` | God-mode edits (`adminUpdateTask` never sends `hidden`) |
+| `adminSetTaskSuspended(id, suspended): Task` | Suspend task / Unsuspend task on the task dossier, after a confirm step |
+| `adminSetUserDisabled(id, disabled): User` | Disable / Re-enable user on user detail, after a confirm step. Disabling also suspends every task the user posted and freezes their quotes and bookings; re-enabling lifts that, but not tasks Slashie suspended directly |
 | `adminReports(status, targetType, first, after): ReportPage` / `adminUpdateReportStatus` | Reports inbox |
 | `adminFeedbackSummary`, `adminFeedbacks(status, category, first, after)`, `adminUpdateFeedbackStatus`, `adminFeedbackDraftReply` (query) | Feedback inbox |
 
 Every list filter is sent to the API and lists page with `after` / `nextCursor`. Column sort orders the fetched page only. The panel has no filter the API cannot apply.
 
-- **Tasks**: search, status (`DRAFT | OPEN | AWARDED | CANCELLED`), hidden, category (one open-text category; suggestions from `popularTaskCategories`, since tasks carry 1 to 10 free-text `categories`), poster (`posterSearch`), budget min/max/type, created date range, map viewport `bbox`. Job completion lives on `Order.status`, not the task.
-- **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`, one row per event that raised no flash; the type is shown in words and `TASK_UPDATED` lists the changed fields); chat messages are not included.
+- **Tasks**: search, status (`DRAFT | OPEN | AWARDED | CANCELLED`), suspended (Any / Yes / No, sent as `AdminTaskFilter.suspended`, for any reason; URL `suspended=1|0`), category (one open-text category; suggestions from `popularTaskCategories`, since tasks carry 1 to 10 free-text `categories`), poster (`posterSearch`), budget min/max/type, created date range, map viewport `bbox`. Job completion lives on `Order.status`, not the task.
+- **Suspension** (BE-108): a task is suspended by Slashie (`Task.suspension.bySlashie`, set with `adminSetTaskSuspended`) and/or because the poster's account is disabled (`posterSuspended`, set by `adminSetUserDisabled`). Both can apply at once and each is lifted on its own, so Unsuspend task only lifts the Slashie one. A suspended task is frozen, not deleted: it leaves search and its quotes and bookings stop moving until it is lifted. The Tasks table and cards show a Suspended pill with the reason, and the dossier shows a banner plus both reasons on Overview. `Task.hidden`, `AdminTaskFilter.hidden` and `AdminUpdateTaskInput.hidden` are deprecated aliases of the Slashie suspension and are not used; `operations.test.ts` fails if an operation selects a deprecated field. `Order.counterpartySuspension` is viewer-relative and not read here.
+- **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. A reopened task keeps its old cancelled order next to the new one, so orders are listed newest first (Latest / Earlier). Quotes show an Account suspended pill when the quoting worker's account is suspended (`Quote.workerSuspended`). Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`, one row per event that raised no flash; the type is shown in words, `TASK_UPDATED` lists the changed fields, and `TASK_SUSPENDED` / `TASK_UNSUSPENDED` show "Reason: suspended by Slashie" or "Reason: poster's account suspended"; the `TASK_REOPENED` timeline row and the `TASK_CANCELLED` / `TASK_REOPENED` flashes read in words too); chat messages are not included.
 - **Reports**: status and target type (`TASK | WORKER | USER | REVIEW | MESSAGE`). Tasks and users link inside admin; workers and reviews link to the public `targetUrl`; `MESSAGE` rows show the reported text (`targetLabel`, no URL).
 - **Feedback**: status and category. Selecting an item loads `adminFeedbackDraftReply` (subject/body with Copy + optional `mailto:`). The panel does not send the reply.
 

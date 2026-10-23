@@ -102,7 +102,7 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
               </dd>
             </div>
             <div>
-              <dt>Hidden tasks</dt>
+              <dt>Suspended by Slashie</dt>
               <dd>{ops.hiddenTasks ?? '—'}</dd>
             </div>
             <div>

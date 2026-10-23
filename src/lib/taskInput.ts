@@ -14,7 +14,6 @@ export type TaskEditFormValues = {
   /** Comma-separated, as typed (`AdminUpdateTaskInput.categories`). */
   categories: string
   status: TaskStatus
-  hidden: boolean
   locationName: string
   locationAddress: string
   locationLat: string
@@ -30,7 +29,6 @@ export type TaskEditSource = {
   description?: string | null
   categories?: readonly string[] | null
   status?: TaskStatus | string | null
-  hidden?: boolean | null
   location?: {
     name?: string | null
     address?: string | null
@@ -62,7 +60,6 @@ export function taskToFormValues(task: TaskEditSource): TaskEditFormValues {
     description: task.description?.trim() ?? '',
     categories: (task.categories ?? []).join(', '),
     status: asEnum(task.status ?? undefined, TASK_STATUSES, TaskStatus.Open),
-    hidden: Boolean(task.hidden),
     locationName: task.location?.name?.trim() ?? '',
     locationAddress: task.location?.address?.trim() ?? '',
     locationLat:
@@ -109,7 +106,6 @@ export function buildAdminUpdateTaskInput(
     description: values.description.trim(),
     categories: splitCategories(values.categories),
     status: values.status,
-    hidden: values.hidden,
   }
 
   if (Number.isFinite(lat) && Number.isFinite(lng) && values.locationName.trim()) {

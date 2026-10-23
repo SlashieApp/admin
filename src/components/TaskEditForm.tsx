@@ -161,15 +161,6 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
         </label>
       </div>
 
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={values.hidden}
-          onChange={(e) => patch('hidden', e.target.checked)}
-        />
-        Hide from marketplace
-      </label>
-
       <fieldset className="fieldset">
         <legend>Location</legend>
         <label className="field">
