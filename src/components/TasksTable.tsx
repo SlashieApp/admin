@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { DataTable, type DataColumn } from '@/components/DataTable'
 import { FilterToolbar } from '@/components/FilterToolbar'
 import { TablePager } from '@/components/TablePager'
-import { AdminTasks } from '@/graphql/operations'
+import { AdminTasks, PopularTaskCategories } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { displayName, formatMoney } from '@/lib/dossier'
 import { bboxesEqual, taskCoordinates } from '@/lib/geo'
@@ -17,7 +17,6 @@ import { nextSort } from '@/lib/listParams'
 import {
   sortTasks,
   TASK_BUDGET_TYPES,
-  TASK_CATEGORIES,
   TASK_STATUSES,
   taskFiltersFromForm,
   taskListPath,
@@ -26,7 +25,10 @@ import {
   type TaskListFilters,
   type TaskListRow,
 } from '@/lib/taskList'
-import type { AdminTasksQuery } from '@codegen/schema'
+import type {
+  AdminTasksQuery,
+  PopularTaskCategoriesQuery,
+} from '@codegen/schema'
 
 const TasksMap = dynamic(
   () => import('@/components/TasksMap').then((mod) => mod.TasksMap),
@@ -50,6 +52,25 @@ export function TasksTable() {
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [cursorStack, setCursorStack] = useState<string[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([])
+
+  // Categories are open text (BE-79), so suggest the ones tasks use most.
+  useEffect(() => {
+    let cancelled = false
+    apolloClient
+      .query<PopularTaskCategoriesQuery>({
+        query: PopularTaskCategories,
+        variables: { first: 30 },
+      })
+      .then((result) => {
+        if (!cancelled) setCategoryOptions(result.data?.popularTaskCategories ?? [])
+      })
+      // Suggestions only: the filter still takes any text.
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -130,7 +151,7 @@ export function TasksTable() {
       key: 'category',
       header: 'Category',
       sortKey: 'category',
-      render: (task) => task.category,
+      render: (task) => task.categories.join(', '),
     },
     {
       key: 'poster',
@@ -245,7 +266,7 @@ export function TasksTable() {
             placeholder="Any category"
           />
           <datalist id="task-category-options">
-            {TASK_CATEGORIES.map((category) => (
+            {categoryOptions.map((category) => (
               <option key={category} value={category} />
             ))}
           </datalist>
@@ -395,7 +416,7 @@ function TaskCard({ task }: { task: TaskListRow }) {
         <span className="pill">{task.status}</span>
       </div>
       <p className="meta">
-        {task.category}
+        {task.categories.join(', ')}
         {task.poster ? ` · ${displayName(task.poster)}` : ''}
         {` · ${formatMoney(task.budget?.amount, task.budget?.currency)}`}
       </p>

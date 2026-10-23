@@ -228,8 +228,8 @@ function OverviewPanel({
             <dd>{task.status}</dd>
           </div>
           <div>
-            <dt>Category</dt>
-            <dd>{task.category}</dd>
+            <dt>Categories</dt>
+            <dd>{task.categories.join(', ') || '—'}</dd>
           </div>
           <div>
             <dt>Hidden</dt>

@@ -11,7 +11,8 @@ export const TASK_STATUSES = Object.values(TaskStatus)
 export type TaskEditFormValues = {
   title: string
   description: string
-  category: string
+  /** Comma-separated, as typed (`AdminUpdateTaskInput.categories`). */
+  categories: string
   status: TaskStatus
   hidden: boolean
   locationName: string
@@ -27,7 +28,7 @@ export type TaskEditFormValues = {
 export type TaskEditSource = {
   title?: string | null
   description?: string | null
-  category?: string | null
+  categories?: readonly string[] | null
   status?: TaskStatus | string | null
   hidden?: boolean | null
   location?: {
@@ -59,7 +60,7 @@ export function taskToFormValues(task: TaskEditSource): TaskEditFormValues {
   return {
     title: task.title?.trim() ?? '',
     description: task.description?.trim() ?? '',
-    category: task.category?.trim() || 'GENERAL',
+    categories: (task.categories ?? []).join(', '),
     status: asEnum(task.status ?? undefined, TASK_STATUSES, TaskStatus.Open),
     hidden: Boolean(task.hidden),
     locationName: task.location?.name?.trim() ?? '',
@@ -88,6 +89,14 @@ export function taskToFormValues(task: TaskEditSource): TaskEditFormValues {
   }
 }
 
+/** "Plumbing, Leaky tap" → ["Plumbing", "Leaky tap"]; the API trims, dedupes and checks 1 to 10. */
+export function splitCategories(text: string): string[] {
+  return text
+    .split(',')
+    .map((category) => category.trim())
+    .filter(Boolean)
+}
+
 export function buildAdminUpdateTaskInput(
   values: TaskEditFormValues,
 ): AdminUpdateTaskInput {
@@ -98,7 +107,7 @@ export function buildAdminUpdateTaskInput(
   const input: AdminUpdateTaskInput = {
     title: values.title.trim(),
     description: values.description.trim(),
-    category: values.category.trim(),
+    categories: splitCategories(values.categories),
     status: values.status,
     hidden: values.hidden,
   }

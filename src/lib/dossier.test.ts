@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   activityFromDossier,
+  timelineBody,
+  timelineTitle,
   displayName,
   linkedWorkersFromDossier,
 } from './dossier'
@@ -76,6 +78,8 @@ describe('activityFromDossier', () => {
       {
         source: 'TIMELINE',
         type: 'TASK_UPDATED',
+        title: 'TASK_UPDATED',
+        body: '{"fields":["BUDGET","DATETIME"]}',
         actorUserId: 'u1',
         createdAt: '2026-09-14T13:00:00.000Z',
       },
@@ -83,8 +87,8 @@ describe('activityFromDossier', () => {
     expect(rows).toEqual([
       {
         id: 'timeline-TASK_UPDATED-2026-09-14T13:00:00.000Z-1',
-        title: 'TASK_UPDATED',
-        body: 'Actor: u1',
+        title: 'Task updated',
+        body: 'Changed: budget, datetime · Actor: u1',
         at: '2026-09-14T13:00:00.000Z',
         kind: 'timeline',
       },
@@ -96,6 +100,17 @@ describe('activityFromDossier', () => {
         kind: 'flash',
       },
     ])
+  })
+})
+
+describe('timeline labels', () => {
+  it('turns event types and data into words', () => {
+    expect(timelineTitle('RESCHEDULE_WITHDRAWN')).toBe('Reschedule withdrawn')
+    expect(timelineTitle(null)).toBe('Activity')
+    expect(timelineBody('{"fields":["CONTACT_METHOD"]}')).toBe('Changed: contact method')
+    expect(timelineBody('{}')).toBe('{}')
+    expect(timelineBody('not json')).toBe('not json')
+    expect(timelineBody(null)).toBe('')
   })
 })
 

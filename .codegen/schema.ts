@@ -30,6 +30,17 @@ export type AcceptQuotePayload = {
   task: Task;
 };
 
+export type AccountDeletionBlocker = {
+  kind: AccountDeletionBlockerKind;
+  orderId: Scalars['ID']['output'];
+  taskId: Scalars['ID']['output'];
+};
+
+export enum AccountDeletionBlockerKind {
+  /** An order that is ACTIVE, RESCHEDULING, CANCEL_REQUESTED or CONFLICT. */
+  LiveOrder = 'LIVE_ORDER'
+}
+
 export type AddQuoteInput = {
   message?: InputMaybe<Scalars['String']['input']>;
   price: PriceInput;
@@ -44,8 +55,8 @@ export type AdditionalEntityFields = {
 };
 
 /**
- * Ops allowlist row. Presence of an active document (plus @slashie.app email)
- * is required for fields marked `@admin`. Not a marketplace user role.
+ * Ops allowlist row. `@admin` also requires a verified `@slashie.app` account
+ * whose id matches `userId` once the row is linked. Not a marketplace user role.
  */
 export type Admin = {
   /** Inactive rows cannot call `@admin` fields. */
@@ -54,7 +65,10 @@ export type Admin = {
   /** Normalized lowercase email. Unique. Must end with `@slashie.app`. */
   email: Scalars['String']['output'];
   id: Scalars['ID']['output'];
-  /** Linked user id when known (set on first successful `@admin` call). */
+  /**
+   * Linked user id. Set on the first successful `@admin` call by the verified
+   * account with this email. Later calls must be that same user.
+   */
   userId?: Maybe<Scalars['ID']['output']>;
 };
 
@@ -230,8 +244,11 @@ export type AdminTaskActivity = {
 };
 
 /**
- * Unified activity row for a task dossier. Flashes plus task timeline events,
- * newest first. Chat messages are not included.
+ * Unified activity row for a task dossier, newest first, one row per event: the
+ * flash when the event raised one (with who could see it), otherwise the task
+ * timeline event (task edits, reviews, withdrawn or lapsed booking requests).
+ * Flashes that are not events, such as review prompts, are rows too. Chat
+ * messages are not included. The full typed log is `task.timeline`.
  */
 export enum AdminTaskActivitySource {
   Flash = 'FLASH',
@@ -240,8 +257,9 @@ export enum AdminTaskActivitySource {
 
 /**
  * Everything related to one task for ops. Prefer this over stitching public queries.
- * Task is owner-shaped so location/address/hidden are visible. Quote amounts are
- * included (marketplace `Quote.price` is visible to the poster and the quoting worker).
+ * Task is owner-shaped so location/address/hidden are visible. Quotes always
+ * come with the quoting worker (`Quote.workerUserId`, and `Quote.worker`
+ * including the email).
  */
 export type AdminTaskDossier = {
   activity: Array<AdminTaskActivity>;
@@ -270,7 +288,10 @@ export type AdminTaskFilter = {
   budgetMin?: InputMaybe<Scalars['Float']['input']>;
   /** Exact budget type (`ONE_OFF`, `PER_DAY`, `PER_HOUR`). */
   budgetType?: InputMaybe<TaskBudgetType>;
-  /** Case-insensitive exact category match (same rule as public `TaskFilter.category`). */
+  /**
+   * Tasks that have this category: case-insensitive exact match on any of
+   * `categories` (same rule as public `TaskFilter.category`).
+   */
   category?: InputMaybe<Scalars['String']['input']>;
   /** Inclusive lower bound on task `createdAt` (`createdAt >= value`). */
   createdAfter?: InputMaybe<Scalars['DateTime']['input']>;
@@ -311,7 +332,8 @@ export type AdminTaskStatusCount = {
  */
 export type AdminUpdateTaskInput = {
   budget?: InputMaybe<TaskBudgetInput>;
-  category?: InputMaybe<Scalars['String']['input']>;
+  /** Replaces all categories. Same rules as `CreateTaskInput.categories`. */
+  categories?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Date and time preference. Pass null to clear. */
   datetime?: InputMaybe<TaskDateTimeInput>;
   description?: InputMaybe<Scalars['String']['input']>;
@@ -377,15 +399,21 @@ export type CreateReviewInput = {
 export type CreateTaskInput = {
   /** Budget and currency. */
   budget: TaskBudgetInput;
-  /** Product-defined task category (for example cleaning, moving, repairs). */
-  category: Scalars['String']['input'];
+  /**
+   * 1 to 10 open category tags, any text (for example "Plumbing", "Leaky tap").
+   * Each is trimmed with inner spaces collapsed; empty ones are dropped and
+   * duplicates removed ignoring case (the first spelling is kept). Errors:
+   * `CATEGORY_REQUIRED` (none left), `TOO_MANY_CATEGORIES` (over 10),
+   * `CATEGORY_TOO_LONG` (over 64 characters).
+   */
+  categories: Array<Scalars['String']['input']>;
   /** Date and time preference (before/flexible/exact). */
   datetime?: InputMaybe<TaskDateTimeInput>;
   /** Detailed description of the job. */
   description: Scalars['String']['input'];
   /** Additional image URLs or keys after upload. */
   images?: InputMaybe<Array<Scalars['String']['input']>>;
-  /** Map-derived coordinates and place name for search. */
+  /** Map-derived coordinates and address. `name` is reduced to the town on save. */
   location: TaskLocationInput;
   /** Which profile contact channel may be shared with workers. */
   preferredContactMethod: TaskContactMethod;
@@ -500,9 +528,17 @@ export enum FlashKind {
   OrderMarkedFailed = 'ORDER_MARKED_FAILED',
   QuoteAccepted = 'QUOTE_ACCEPTED',
   QuoteDeclined = 'QUOTE_DECLINED',
-  /** The owner accepted another worker's quote. Only the non-selected worker sees it. */
+  /**
+   * The owner accepted another worker's quote. Only the non-selected worker sees
+   * it; it carries their quote (now NOT_SELECTED).
+   */
   QuoteNotSelected = 'QUOTE_NOT_SELECTED',
   QuoteReceived = 'QUOTE_RECEIVED',
+  /**
+   * The worker withdrew their quote. Owner and worker see it; it carries the
+   * quote (now WITHDRAWN).
+   */
+  QuoteWithdrawn = 'QUOTE_WITHDRAWN',
   RescheduleConfirmed = 'RESCHEDULE_CONFIRMED',
   RescheduleDeclined = 'RESCHEDULE_DECLINED',
   RescheduleRequested = 'RESCHEDULE_REQUESTED',
@@ -537,6 +573,39 @@ export enum IdentityVerificationStatus {
   Verified = 'VERIFIED'
 }
 
+/**
+ * One image upload (BE-83). PUT the file's bytes to `url`, then pass `uploadKey`
+ * to `finalizeTaskImage` or `finalizeAvatarUpload`. The upload is private, and
+ * one that is never finalized is deleted after about an hour.
+ */
+export type ImageUpload = {
+  /** Pass this to the finalize mutation. */
+  uploadKey: Scalars['String']['output'];
+  /** Time-limited presigned PUT URL. Any Content-Type; the server reads the bytes. */
+  url: Scalars['String']['output'];
+};
+
+export type LinkLoginMethodInput = {
+  /**
+   * `APPLE` only. The one-time authorization code, so deletion can revoke the
+   * refresh token. Optional.
+   */
+  authorizationCode?: InputMaybe<Scalars['String']['input']>;
+  /** `APPLE` only. Used to fill an empty profile name. The address comes from the token. */
+  firstName?: InputMaybe<Scalars['String']['input']>;
+  /** `APPLE` only. See `firstName`. */
+  lastName?: InputMaybe<Scalars['String']['input']>;
+  /** `GOOGLE` or `APPLE`. `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`. */
+  method: LoginMethod;
+  /** `APPLE` only. The raw nonce. Same rule as `LoginInput.nonce`. */
+  nonce?: InputMaybe<Scalars['String']['input']>;
+  /**
+   * `GOOGLE`: Google ID token. `APPLE`: Sign in with Apple identity token.
+   * Invalid or expired: `INVALID_OAUTH_TOKEN`.
+   */
+  oauthToken: Scalars['String']['input'];
+};
+
 export type Location = {
   /** Free-text or structured address line when present. */
   address?: Maybe<Scalars['String']['output']>;
@@ -560,6 +629,12 @@ export type LocationInput = {
 };
 
 export type LoginInput = {
+  /**
+   * `APPLE` only. The one-time authorization code from the sign-in. Exchanged
+   * for a refresh token so account deletion can revoke it. Optional: sign-in
+   * still works without it, and those accounts cannot be revoked at Apple.
+   */
+  authorizationCode?: InputMaybe<Scalars['String']['input']>;
   /** Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`. */
   captchaToken?: InputMaybe<Scalars['String']['input']>;
   email?: InputMaybe<Scalars['String']['input']>;
@@ -572,13 +647,21 @@ export type LoginInput = {
   lastName?: InputMaybe<Scalars['String']['input']>;
   method?: LoginMethod;
   /**
+   * `APPLE` only. The raw nonce. The identity token's `nonce` claim must be the
+   * SHA-256 hex of this value. A token that carries a nonce, or a raw value that
+   * does not match, is `INVALID_OAUTH_TOKEN`. Clients that do not send one yet
+   * can omit it; their tokens have no nonce claim.
+   */
+  nonce?: InputMaybe<Scalars['String']['input']>;
+  /**
    * `GOOGLE`: Google ID token. `APPLE`: Sign in with Apple identity token (audience
    * = web Services ID or iOS bundle ID). Invalid or expired: `INVALID_OAUTH_TOKEN`.
    * A first Google / Apple login whose email matches an existing account links to it
    * only when that account's email is verified and the provider verified it too;
    * otherwise `OAUTH_LINK_REQUIRES_VERIFIED_EMAIL` (sign in with the password and
    * verify the email first). Email already linked to a different Google / Apple
-   * account: `OAUTH_ACCOUNT_CONFLICT`.
+   * account: `OAUTH_ACCOUNT_CONFLICT`. Linking a provider whose address is not the
+   * account email is `linkLoginMethod`, while signed in. That keeps `email`.
    */
   oauthToken?: InputMaybe<Scalars['String']['input']>;
   password?: InputMaybe<Scalars['String']['input']>;
@@ -594,7 +677,12 @@ export type Mutation = {
   _empty?: Maybe<Scalars['String']['output']>;
   /** The other party agrees → CANCELLED. */
   acceptOrderCancellation: Order;
-  /** Accept a worker's quote on one of its slots and create the Order (booked at that slot). */
+  /**
+   * Accept a worker's quote on one of its slots and create the Order (booked at that slot).
+   * Works from Messages with a flash's `quoteId` and a `quote.proposedSlots` id.
+   * Every other worker's PENDING quote becomes NOT_SELECTED, and each of them gets
+   * a `QUOTE_NOT_SELECTED` flash carrying their quote.
+   */
   acceptQuote: AcceptQuotePayload;
   /**
    * Worker submits a quote, or updates a pending quote by inserting another row
@@ -604,7 +692,7 @@ export type Mutation = {
    * another slot. After withdraw, that task no longer counts until quoted again.
    * Unlimited and Pro memberships bypass the cap.
    * Blocked while this worker has an ACCEPTED quote on the task.
-   * `QUOTE_RECEIVED` is emitted only for the first quote, not for append updates.
+   * Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
    */
   addQuote: Quote;
   /** Ops soft-hide. Keeps the row. Does not add the author review-then-delete flag. */
@@ -649,8 +737,23 @@ export type Mutation = {
   cancelPhoneChange: Scalars['Boolean']['output'];
   /** The requester withdraws their reschedule request → ACTIVE. */
   cancelRescheduleRequest: Order;
-  /** Cancel an open task owned by the current user. */
+  /**
+   * Cancel an open task owned by the current user. Errors:
+   * `TASK_HAS_ACCEPTED_QUOTE` (someone is booked), `TASK_ALREADY_CANCELLED` (a
+   * repeat call; nothing more is logged), `TASK_CHANGED` (it changed while
+   * cancelling; read it again).
+   */
   cancelTask: Task;
+  /**
+   * Replace the password while signed in. The current password is the re-auth
+   * (login rate limit and lockout). Google / Apple-only accounts use
+   * `setPassword`. Ends every other session (BE-102): tokens issued before now
+   * stop working and open subscriptions close. Returns a new token for this
+   * device; store it in place of the old one. Errors: `PASSWORD_NOT_SET`,
+   * `INVALID_CREDENTIALS`, `WEAK_PASSWORD` (under 8 characters),
+   * `PASSWORD_UNCHANGED`.
+   */
+  changePassword: AuthPayload;
   /** The other party picks one proposed slot → ACTIVE with the new booked time. */
   confirmReschedule: Order;
   /**
@@ -658,6 +761,11 @@ export type Mutation = {
    * Persists first, then sends an auto-ack (fail-open if email fails).
    */
   createFeedback: Feedback;
+  /**
+   * A new private upload for one image. Accepted images: JPEG, PNG, WebP,
+   * HEIC/HEIF and AVIF, up to 15 MB and 100 megapixels.
+   */
+  createImageUpload: ImageUpload;
   /**
    * Submit a report against a task, worker profile, user, or review. Auth required.
    * Rate-limited per user and IP. Rejects self-reports and unknown targets.
@@ -676,16 +784,51 @@ export type Mutation = {
   createWorkerSubscriptionCheckout: CheckoutSessionPayload;
   /** The other party refuses → back to ACTIVE (or stays CONFLICT). */
   declineOrderCancellation: Order;
-  /** Task poster declines a worker's pending quote (not the same as `withdrawQuote`). */
+  /**
+   * Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
+   * Works from Messages with a flash's `quoteId`. Raises `QUOTE_DECLINED` with the
+   * quote.
+   */
   declineQuote: Quote;
   /** The other party rejects the request → ACTIVE with the old booked time. */
   declineReschedule: Order;
+  /**
+   * Converts an upload into the caller's avatar (JPEG, long edge at most
+   * 1024 px, metadata removed), sets `avatarUrl` and deletes the previous
+   * uploaded avatar. Errors: `UPLOAD_NOT_FOUND`, `IMAGE_TOO_LARGE`,
+   * `UNSUPPORTED_IMAGE`.
+   */
+  finalizeAvatarUpload: User;
+  /**
+   * Converts an upload into task photo `index` (0 to 9) and returns its public
+   * URL. Stored as a JPEG: oriented, long edge at most 2048 px, all metadata
+   * (GPS included) removed. Replaces any earlier photo in that slot. Task poster
+   * only, while the task is OPEN or DRAFT. Errors: `UPLOAD_NOT_FOUND`,
+   * `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `INVALID_INDEX`, `TASK_NOT_FOUND`,
+   * `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`.
+   */
+  finalizeTaskImage: Scalars['String']['output'];
   forgotPassword: ForgotPasswordPayload;
   /**
    * Author soft-hide. The row stays for audit and the one-review slot stays used.
    * Flags REVIEW_THEN_DELETE for the ops queue.
    */
   hideReview: Review;
+  /**
+   * Link Google or Apple to the signed-in account from the login method page.
+   *
+   * The account email stays as it is. The provider address, including an Apple
+   * Hide My Email relay, is stored only as `googleLoginEmail` or
+   * `appleLoginEmail`. A blank account email is filled from the provider. A new
+   * Google or Apple sign-in (no account yet) still uses `loginWithMethod`, which
+   * copies the provider address into `email`.
+   *
+   * `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`. A bad token is
+   * `INVALID_OAUTH_TOKEN`. That Google or Apple account already on someone else,
+   * or a different one already on this account, is `OAUTH_ACCOUNT_CONFLICT`.
+   * Apple's first link must include the address (`APPLE_EMAIL_REQUIRED`).
+   */
+  linkLoginMethod: User;
   login: AuthPayload;
   loginWithMethod: AuthPayload;
   /**
@@ -697,8 +840,11 @@ export type Mutation = {
   markOrderFailed: Order;
   /** Mark everything in the thread read for the viewer. */
   markThreadRead: Thread;
+  /**
+   * Create a password account. `@slashie.app` is reserved (`EMAIL_DOMAIN_RESERVED`);
+   * staff sign in with Google or Apple.
+   */
   register: AuthPayload;
-  registerAsPro: Worker;
   /**
    * Register or refresh a device push token for the authenticated user.
    * Upserts by token so the same device can move between accounts.
@@ -713,11 +859,25 @@ export type Mutation = {
    */
   registerWebPushSubscription: WebPushSubscription;
   /**
+   * Delete my account. The account is disabled straight away and anonymised 30
+   * days later unless restored. Open tasks are cancelled and pending quotes
+   * withdrawn (they stay that way after a restore). Emails a confirmation now, a
+   * reminder around day 25, and a notice when done.
+   *
+   * Re-auth: password accounts must pass `password` (behind the login rate limit
+   * and lockout; wrong: `INVALID_CREDENTIALS`). Google / Apple-only accounts must
+   * have signed in within the last 10 minutes (`REAUTH_REQUIRED`).
+   * Blocked while any of my orders is ACTIVE, RESCHEDULING, CANCEL_REQUESTED or
+   * CONFLICT: `ACCOUNT_HAS_LIVE_ORDERS`.
+   */
+  requestAccountDeletion: User;
+  /**
    * Start an email change (password accounts only). Stores `pendingEmail`, emails
    * a verify link to it, and notifies the current address. `email` changes only
    * when the link is used (`verifyEmail`). Errors: `EMAIL_CHANGE_NOT_ALLOWED`
    * (Google- or Apple-only account), `INVALID_CREDENTIALS` (behind the login rate limit and
-   * lockout), `INVALID_EMAIL`, `EMAIL_UNCHANGED`, `EMAIL_OR_PHONE_IN_USE`,
+   * lockout), `INVALID_EMAIL`, `EMAIL_UNCHANGED`, `EMAIL_DOMAIN_RESERVED`
+   * (`@slashie.app`), `EMAIL_OR_PHONE_IN_USE`,
    * `RESEND_VERIFICATION_RATE_LIMITED`.
    */
   requestEmailChange: Scalars['Boolean']['output'];
@@ -731,7 +891,17 @@ export type Mutation = {
    * `RESEND_VERIFICATION_RATE_LIMITED`.
    */
   resendVerificationEmail: Scalars['Boolean']['output'];
+  /**
+   * Set a new password from the emailed reset link. Ends every session that
+   * existed before (BE-102) and returns a token for this device.
+   */
   resetPassword: AuthPayload;
+  /**
+   * Cancel a pending account deletion (after a normal sign-in). Allowed while
+   * the account is disabled for deletion. No deletion pending: returns the user
+   * unchanged.
+   */
+  restoreAccount: User;
   /** Save this worker to the viewer's list. Idempotent; cannot save yourself. */
   saveWorker: Worker;
   /**
@@ -756,13 +926,29 @@ export type Mutation = {
    * The saved number and its verification stay live until `verifyPhone`. Works
    * for first-time verification (the saved number) and for changing a verified
    * number. Returns true without sending when `phone` is the already verified
-   * number. Errors: `EMAIL_OR_PHONE_IN_USE`, `PHONE_VERIFICATION_RATE_LIMITED`
-   * (3 sends per hour per user).
+   * number. Replacing a verified number requires `password`, or a sign-in in the
+   * last 10 minutes when the account has no password (`REAUTH_REQUIRED`), and
+   * texts the old number. Errors: `EMAIL_OR_PHONE_IN_USE`,
+   * `PHONE_VERIFICATION_RATE_LIMITED` (3 sends per hour per user),
+   * `INVALID_CREDENTIALS`, `REAUTH_REQUIRED`.
    */
   sendPhoneVerification: Scalars['Boolean']['output'];
+  /**
+   * Add a password to a Google / Apple-only account. The sign-in must be from
+   * the last 10 minutes (`REAUTH_REQUIRED`). Errors: `PASSWORD_ALREADY_SET`,
+   * `WEAK_PASSWORD`.
+   */
+  setPassword: User;
   /** Force Stripe subscription reconcile and return fresh membership (e.g. after Checkout return). */
   syncWorkerBilling: WorkerMembership;
   unblockUser: Scalars['Boolean']['output'];
+  /**
+   * Remove Google or Apple from the signed-in account. The account email stays.
+   * `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`. Refuses when it would leave no
+   * password and no other provider (`LAST_LOGIN_METHOD`): set a password or keep
+   * the other provider first. Already unlinked: returns the user unchanged.
+   */
+  unlinkLoginMethod: User;
   /**
    * Unregister a device push token owned by the authenticated user.
    * Returns true when a matching active token was removed/deactivated.
@@ -775,6 +961,13 @@ export type Mutation = {
   unregisterWebPushSubscription: Scalars['Boolean']['output'];
   /** Remove this worker from the viewer's list. Idempotent. */
   unsaveWorker: Worker;
+  /**
+   * Turn marketing email off from the link in a marketing email. No login. Safe
+   * to repeat. The token never expires. The same token also works as a one-click
+   * `POST /unsubscribe?token=` (RFC 8058, used by mail apps).
+   * Errors: `INVALID_UNSUBSCRIBE_TOKEN`.
+   */
+  unsubscribeMarketingEmails: Scalars['Boolean']['output'];
   updateMyProfile: User;
   updateMySettings: User;
   /**
@@ -793,6 +986,13 @@ export type Mutation = {
    */
   updateTask: Task;
   /**
+   * Edit a finished worker profile in one call. Same checks as replaying
+   * `saveWorkerSetupStep` for details, bio, skills, experience, location,
+   * travel and portfolio. Setup progress stays complete. A draft is
+   * `WORKER_SETUP_INCOMPLETE` — finish setup with `saveWorkerSetupStep`.
+   */
+  updateWorkerProfile: Worker;
+  /**
    * Complete email verification from the signed link (`/verify-email?token=...`).
    * Returns a fresh session token with `emailVerified: true`. Idempotent when already verified.
    *
@@ -800,6 +1000,7 @@ export type Mutation = {
    * becomes the pending address, the old address gets a notice. A link for an
    * address that is neither the email nor the pending email (cancelled or
    * replaced): `EMAIL_MISMATCH`. Address taken meanwhile: `EMAIL_OR_PHONE_IN_USE`.
+   * A pending `@slashie.app` address: `EMAIL_DOMAIN_RESERVED`.
    */
   verifyEmail: AuthPayload;
   /**
@@ -812,10 +1013,11 @@ export type Mutation = {
   /** The requester withdraws their cancellation request. */
   withdrawOrderCancellation: Order;
   /**
-   * Worker withdraws their own pending quote before it is accepted.
-   * Sets every live quote for that task and worker to EXPIRED. Accepted quotes
-   * cannot be withdrawn. The task drops out of the worker pipeline and
-   * `Task.quotes`. A later `addQuote` inserts a new PENDING row.
+   * Worker withdraws their own pending quote before it is accepted. That quote
+   * becomes WITHDRAWN (any older live versions EXPIRED), and the owner and worker
+   * get a `QUOTE_WITHDRAWN` flash. Accepted quotes cannot be withdrawn. The task
+   * drops out of the worker pipeline and `Task.quotes`, and stops counting toward
+   * the monthly quote limit. A later `addQuote` inserts a new PENDING row.
    */
   withdrawQuote: Quote;
 };
@@ -891,6 +1093,12 @@ export type MutationCancelTaskArgs = {
 };
 
 
+export type MutationChangePasswordArgs = {
+  currentPassword: Scalars['String']['input'];
+  newPassword: Scalars['String']['input'];
+};
+
+
 export type MutationConfirmRescheduleArgs = {
   orderId: Scalars['ID']['input'];
   slotId: Scalars['ID']['input'];
@@ -943,6 +1151,18 @@ export type MutationDeclineRescheduleArgs = {
 };
 
 
+export type MutationFinalizeAvatarUploadArgs = {
+  uploadKey: Scalars['String']['input'];
+};
+
+
+export type MutationFinalizeTaskImageArgs = {
+  index: Scalars['Int']['input'];
+  taskId: Scalars['ID']['input'];
+  uploadKey: Scalars['String']['input'];
+};
+
+
 export type MutationForgotPasswordArgs = {
   captchaToken?: InputMaybe<Scalars['String']['input']>;
   email: Scalars['String']['input'];
@@ -951,6 +1171,11 @@ export type MutationForgotPasswordArgs = {
 
 export type MutationHideReviewArgs = {
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationLinkLoginMethodArgs = {
+  input: LinkLoginMethodInput;
 };
 
 
@@ -992,11 +1217,6 @@ export type MutationRegisterArgs = {
 };
 
 
-export type MutationRegisterAsProArgs = {
-  input: ProRegistrationInput;
-};
-
-
 export type MutationRegisterDevicePushTokenArgs = {
   platform?: InputMaybe<PushPlatform>;
   token: Scalars['String']['input'];
@@ -1005,6 +1225,11 @@ export type MutationRegisterDevicePushTokenArgs = {
 
 export type MutationRegisterWebPushSubscriptionArgs = {
   input: RegisterWebPushSubscriptionInput;
+};
+
+
+export type MutationRequestAccountDeletionArgs = {
+  password?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1048,12 +1273,23 @@ export type MutationSendMessageArgs = {
 
 
 export type MutationSendPhoneVerificationArgs = {
+  password?: InputMaybe<Scalars['String']['input']>;
   phone: Scalars['String']['input'];
+};
+
+
+export type MutationSetPasswordArgs = {
+  newPassword: Scalars['String']['input'];
 };
 
 
 export type MutationUnblockUserArgs = {
   userId: Scalars['ID']['input'];
+};
+
+
+export type MutationUnlinkLoginMethodArgs = {
+  method: LoginMethod;
 };
 
 
@@ -1069,6 +1305,11 @@ export type MutationUnregisterWebPushSubscriptionArgs = {
 
 export type MutationUnsaveWorkerArgs = {
   workerId: Scalars['ID']['input'];
+};
+
+
+export type MutationUnsubscribeMarketingEmailsArgs = {
+  token: Scalars['String']['input'];
 };
 
 
@@ -1097,6 +1338,11 @@ export type MutationUpdateReviewArgs = {
 export type MutationUpdateTaskArgs = {
   input: UpdateTaskInput;
   taskId: Scalars['ID']['input'];
+};
+
+
+export type MutationUpdateWorkerProfileArgs = {
+  input: UpdateWorkerProfileInput;
 };
 
 
@@ -1265,7 +1511,7 @@ export type OrderReviewState = {
 
 export type OrderSnapshot = {
   budgetAmount?: Maybe<Scalars['Float']['output']>;
-  category: Scalars['String']['output'];
+  categories: Array<Scalars['String']['output']>;
   contactMethod?: Maybe<Scalars['String']['output']>;
   datetime?: Maybe<TaskDateTime>;
   description: Scalars['String']['output'];
@@ -1333,28 +1579,20 @@ export type Pricing = {
   priceAmount: Scalars['Int']['output'];
   priceCurrency: Scalars['String']['output'];
   priceInterval: Scalars['String']['output'];
+  /** Charges every this many intervals. 3 with `priceInterval` month is every 3 months. */
+  priceIntervalCount: Scalars['Int']['output'];
   productName: Scalars['String']['output'];
   /** Stripe Price id for future Checkout integration. */
   stripePriceId: Scalars['String']['output'];
   /** Stripe Product id for future Checkout integration. */
   stripeProductId?: Maybe<Scalars['String']['output']>;
-  /** Free-trial length in days (e.g. 180 for a 6-month trial). */
+  /**
+   * Free-trial length in days (e.g. 180 for a 6-month trial).
+   * The Price's own trial when it has one, otherwise 180. Same source as Checkout.
+   */
   trialDays?: Maybe<Scalars['Int']['output']>;
   /** Human-readable trial label for marketing copy (e.g. "6 months free"). */
   trialLabel?: Maybe<Scalars['String']['output']>;
-};
-
-export type ProRegistrationInput = {
-  bio?: InputMaybe<Scalars['String']['input']>;
-  /** Date of birth (private). Persisted on the user; must meet the minimum worker age. */
-  dateOfBirth?: InputMaybe<Scalars['DateTime']['input']>;
-  /** Worker's legal name. Persisted on the worker and as the user's canonical profile name. */
-  legalName: Scalars['String']['input'];
-  location: LocationInput;
-  /** Optional service area (travel radius + label) captured at registration. */
-  serviceArea?: InputMaybe<ServiceAreaInput>;
-  tagline?: InputMaybe<Scalars['String']['input']>;
-  yearsExperience?: InputMaybe<Scalars['Int']['input']>;
 };
 
 export type Profile = {
@@ -1375,10 +1613,10 @@ export type Profile = {
  * Public profile for `/profile/[userId]`.
  *
  * Anonymous access is allowed. Null when the id is invalid or missing, the
- * account is disabled (suspended or banned — stored as `disabled`), or
- * `settings.isProfilePrivate` is true. That null is the empty public shell
- * and does not say which case it was, including when the viewer is the subject.
- * Owners of a hidden profile use `me` for private account data.
+ * account is disabled (suspended or banned — stored as `disabled`), deleted,
+ * or `settings.isProfilePrivate` is true and the viewer is not the owner.
+ * That null does not say which case it was. The owner of a private profile
+ * gets this preview (`isHidden` is true), including Your activity.
  *
  * `taskAchievements` and `workHistory` are null unless the authenticated
  * viewer is this user. Strangers do not receive agreed totals, streaks,
@@ -1387,11 +1625,18 @@ export type Profile = {
  * Never includes email, phone, street address, or Stripe ids.
  */
 export type PublicProfile = {
+  /** Completed bookings this account posted. Same count as `User.hostedCompletedCount`. */
+  hostedCompletedCount: Scalars['Int']['output'];
   /**
    * Stable user id (`users._id`). Same id as `/user/[id]`, `Query.user(id:)`,
    * and `me.id`.
    */
   id: Scalars['ID']['output'];
+  /**
+   * True when this profile is private. Only the owner receives the profile in
+   * that case, so a stranger never sees this flag.
+   */
+  isHidden: Scalars['Boolean']['output'];
   /** True when the JWT subject is this user. Computed on the server. */
   isSelf: Scalars['Boolean']['output'];
   /** When the account was created. */
@@ -1431,7 +1676,7 @@ export type PublicProfile = {
    * A self-hired order (same account on both sides) appears once, as `WORKER`.
    *
    * Null for every viewer who is not this user. Omit `search` to feed a
-   * calendar; pass `search` for a case-insensitive match on title, category,
+   * calendar; pass `search` for a case-insensitive match on title, any category,
    * and area label. Agreed amounts are not on these rows.
    */
   workHistory?: Maybe<Array<PublicProfileWorkHistoryItem>>;
@@ -1447,10 +1692,10 @@ export type PublicProfile = {
  * Public profile for `/profile/[userId]`.
  *
  * Anonymous access is allowed. Null when the id is invalid or missing, the
- * account is disabled (suspended or banned — stored as `disabled`), or
- * `settings.isProfilePrivate` is true. That null is the empty public shell
- * and does not say which case it was, including when the viewer is the subject.
- * Owners of a hidden profile use `me` for private account data.
+ * account is disabled (suspended or banned — stored as `disabled`), deleted,
+ * or `settings.isProfilePrivate` is true and the viewer is not the owner.
+ * That null does not say which case it was. The owner of a private profile
+ * gets this preview (`isHidden` is true), including Your activity.
  *
  * `taskAchievements` and `workHistory` are null unless the authenticated
  * viewer is this user. Strangers do not receive agreed totals, streaks,
@@ -1467,10 +1712,10 @@ export type PublicProfileOpenTaskCountArgs = {
  * Public profile for `/profile/[userId]`.
  *
  * Anonymous access is allowed. Null when the id is invalid or missing, the
- * account is disabled (suspended or banned — stored as `disabled`), or
- * `settings.isProfilePrivate` is true. That null is the empty public shell
- * and does not say which case it was, including when the viewer is the subject.
- * Owners of a hidden profile use `me` for private account data.
+ * account is disabled (suspended or banned — stored as `disabled`), deleted,
+ * or `settings.isProfilePrivate` is true and the viewer is not the owner.
+ * That null does not say which case it was. The owner of a private profile
+ * gets this preview (`isHidden` is true), including Your activity.
  *
  * `taskAchievements` and `workHistory` are null unless the authenticated
  * viewer is this user. Strangers do not receive agreed totals, streaks,
@@ -1488,10 +1733,10 @@ export type PublicProfileOpenTasksArgs = {
  * Public profile for `/profile/[userId]`.
  *
  * Anonymous access is allowed. Null when the id is invalid or missing, the
- * account is disabled (suspended or banned — stored as `disabled`), or
- * `settings.isProfilePrivate` is true. That null is the empty public shell
- * and does not say which case it was, including when the viewer is the subject.
- * Owners of a hidden profile use `me` for private account data.
+ * account is disabled (suspended or banned — stored as `disabled`), deleted,
+ * or `settings.isProfilePrivate` is true and the viewer is not the owner.
+ * That null does not say which case it was. The owner of a private profile
+ * gets this preview (`isHidden` is true), including Your activity.
  *
  * `taskAchievements` and `workHistory` are null unless the authenticated
  * viewer is this user. Strangers do not receive agreed totals, streaks,
@@ -1526,7 +1771,7 @@ export enum PublicProfileUserType {
 export type PublicProfileWorkHistoryItem = {
   /** Borough/city area. A leading street segment is dropped. */
   areaLabel?: Maybe<Scalars['String']['output']>;
-  category: Scalars['String']['output'];
+  categories: Array<Scalars['String']['output']>;
   completedAt: Scalars['DateTime']['output'];
   orderId: Scalars['ID']['output'];
   role: PublicProfileWorkRole;
@@ -1551,8 +1796,13 @@ export enum PublicProfileWorkRole {
 export type PublicProfileWorker = {
   /** About text (worker bio). */
   bio?: Maybe<Scalars['String']['output']>;
-  /** Completed platform jobs, newest first. No prices. */
+  /**
+   * Completed platform jobs, newest first. No prices. `first` limits the page
+   * (at most 100). Omit it to return every row.
+   */
   completedJobs: Array<WorkerCompletedJob>;
+  /** Completed platform jobs, including rows past `first`. */
+  completedJobsCount: Scalars['Int']['output'];
   /** Trust flag only. The email address is not on this type. */
   emailVerified: Scalars['Boolean']['output'];
   /** Worker document id. Not the profile URL — use `PublicProfile.id`. */
@@ -1580,6 +1830,17 @@ export type PublicProfileWorker = {
   yearsExperience?: Maybe<Scalars['Int']['output']>;
 };
 
+
+/**
+ * Directory-visible worker section on a public profile.
+ *
+ * About, skills, an approximate service area, and completed-job rows.
+ * No street address, coordinates, membership, or agreed amounts.
+ */
+export type PublicProfileWorkerCompletedJobsArgs = {
+  first?: InputMaybe<Scalars['Int']['input']>;
+};
+
 /**
  * Public user profile for a marketplace peek (task poster or any other account).
  *
@@ -1593,6 +1854,12 @@ export type PublicProfileWorker = {
 export type PublicUser = {
   /** When the account was created. */
   createdAt: Scalars['DateTime']['output'];
+  /**
+   * True once the account has been deleted (anonymised on day 30). The profile
+   * then shows as "Deleted user" with no avatar: don't link to it. False while a
+   * deletion is only scheduled.
+   */
+  deleted: Scalars['Boolean']['output'];
   id: Scalars['ID']['output'];
   /** When the account was created. Same instant as `createdAt`. */
   memberSince: Scalars['DateTime']['output'];
@@ -1733,17 +2000,6 @@ export type Query = {
    * `disabled` / `isWorker` / date bounds are optional composed filters.
    */
   adminUsers: UserPage;
-  /**
-   * Generates a pre-signed S3 PUT URL for the authenticated user's profile avatar
-   * under `users/<userId>/<filename>`. Persist `publicUrl` via `updateMyProfile`
-   * after a successful upload.
-   */
-  getProfileAvatarUpload: S3Url;
-  /**
-   * Generates one pre-signed S3 PUT URL for uploading a task file; requires authentication.
-   * Caller must be the task creator.
-   */
-  getTaskS3Upload: Array<S3Url>;
   health: Scalars['String']['output'];
   me: User;
   /**
@@ -1759,13 +2015,21 @@ export type Query = {
   orderReceipt: OrderReceipt;
   /** Review state for one order. Caller must be a party on the order. */
   orderReviews: OrderReviewState;
+  /**
+   * Most-used categories on open, visible tasks, most used first: suggestions
+   * for the create-task category input. Grouped ignoring case; each shows its
+   * most common spelling. `first` defaults to 12, capped at 50. Anonymous OK.
+   */
+  popularTaskCategories: Array<Scalars['String']['output']>;
   /** Public worker subscription pricing (Slashie Unlimited). No auth required. */
   pricing: Pricing;
   /**
    * Public profile by user id for `/profile/[userId]`. Anonymous OK.
    *
    * Null when the user does not exist, the id is invalid, the account is
-   * disabled, or the profile is private. See `PublicProfile`.
+   * disabled or deleted, or the profile is private and the viewer is not the
+   * owner. The owner of a private profile gets the preview, with `isHidden`.
+   * See `PublicProfile`.
    */
   publicProfile?: Maybe<PublicProfile>;
   /**
@@ -1809,7 +2073,11 @@ export type Query = {
    * Use `me` for the signed-in account.
    *
    * Null when the user does not exist, the id is invalid, the account is
-   * disabled, or the profile is private (`settings.isProfilePrivate`).
+   * disabled or waiting for deletion, or the profile is private
+   * (`settings.isProfilePrivate`). A deleted account returns a shell named
+   * "Deleted user" with no avatar, worker profile or open tasks, and
+   * `deleted: true`, so references (reviews, orders) keep working without a
+   * profile link; `publicProfile` stays null for it.
    */
   user?: Maybe<PublicUser>;
   /**
@@ -1898,17 +2166,6 @@ export type QueryAdminUsersArgs = {
 };
 
 
-export type QueryGetProfileAvatarUploadArgs = {
-  filename: Scalars['String']['input'];
-};
-
-
-export type QueryGetTaskS3UploadArgs = {
-  index: Scalars['String']['input'];
-  taskId: Scalars['ID']['input'];
-};
-
-
 export type QueryOrderArgs = {
   id?: InputMaybe<Scalars['ID']['input']>;
   taskId?: InputMaybe<Scalars['ID']['input']>;
@@ -1922,6 +2179,11 @@ export type QueryOrderReceiptArgs = {
 
 export type QueryOrderReviewsArgs = {
   orderId: Scalars['ID']['input'];
+};
+
+
+export type QueryPopularTaskCategoriesArgs = {
+  first?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
@@ -1977,28 +2239,51 @@ export type QueryWorkersArgs = {
   sort?: InputMaybe<WorkerSort>;
 };
 
+/**
+ * A worker's offer on a task. `Task.quotes` decides who sees which quotes. Every
+ * quote a viewer gets has its price, times and message; who sent it
+ * (`workerUserId`, `worker`) is only there for the task owner, that worker and
+ * ops.
+ */
 export type Quote = {
   createdAt: Scalars['DateTime']['output'];
   id: Scalars['ID']['output'];
+  /** Pitch from the quoting worker, for anyone who can see the quote. */
   message?: Maybe<Scalars['String']['output']>;
+  /** The quoted amount, for anyone who can see the quote. */
   price?: Maybe<Price>;
-  /** The worker's 1-2 exact slots. The owner picks one on `acceptQuote`. */
+  /**
+   * The worker's 1-2 exact slots, for anyone who can see the quote. The owner
+   * picks one on `acceptQuote`.
+   */
   proposedSlots: Array<TimeSlot>;
   status: QuoteStatus;
   task: Task;
   taskId: Scalars['ID']['output'];
-  worker: User;
-  workerUserId: Scalars['ID']['output'];
+  /**
+   * The quoting worker. Same rule as `workerUserId`: the task owner, that
+   * worker, and ops only; null for everyone else, guests included. `email` is
+   * empty unless the viewer is that worker or the admin task dossier; the task
+   * owner does not get it, even after accepting.
+   */
+  worker?: Maybe<User>;
+  /**
+   * The quoting worker's user id. Only the task owner, that worker, and ops
+   * (through the admin queries) get it. Null for everyone else, guests included.
+   */
+  workerUserId?: Maybe<Scalars['ID']['output']>;
 };
 
 export enum QuoteStatus {
   Accepted = 'ACCEPTED',
   Declined = 'DECLINED',
   /**
-   * Previous quote after an append overwrite, or a withdrawn quote.
-   * Product reads omit EXPIRED rows.
+   * Replaced by a newer quote from the same worker on the same task (its own
+   * `QUOTE_RECEIVED` flash carries the new one). Product reads omit EXPIRED rows.
    */
   Expired = 'EXPIRED',
+  /** The owner accepted another worker's quote on this task. */
+  NotSelected = 'NOT_SELECTED',
   Pending = 'PENDING',
   Rejected = 'REJECTED',
   Withdrawn = 'WITHDRAWN'
@@ -2082,6 +2367,13 @@ export enum ReportTargetType {
  * Stars are 1–5. `comment` is optional. Hidden rows stay in the database.
  */
 export type Review = {
+  /** Author's public photo. Null when the account is deleted or has none. */
+  authorAvatarUrl?: Maybe<Scalars['String']['output']>;
+  /**
+   * First word of the author's public name. Null when the account is deleted
+   * or has no name. Not the legal name.
+   */
+  authorFirstName?: Maybe<Scalars['String']['output']>;
   authorRole: ReviewPartyRole;
   authorUserId: Scalars['ID']['output'];
   comment?: Maybe<Scalars['String']['output']>;
@@ -2091,6 +2383,11 @@ export type Review = {
   /** Set when the author or an admin soft-hides the review. The row is kept. */
   hiddenAt?: Maybe<Scalars['DateTime']['output']>;
   id: Scalars['ID']['output'];
+  /**
+   * Job title from the order snapshot, or the first category when the title
+   * is empty.
+   */
+  jobTitle?: Maybe<Scalars['String']['output']>;
   orderId: Scalars['ID']['output'];
   stars: Scalars['Int']['output'];
   subjectUserId: Scalars['ID']['output'];
@@ -2114,17 +2411,7 @@ export enum ReviewPartyRole {
   Worker = 'WORKER'
 }
 
-/** Presigned upload URL (PUT). Task objects use prefix `tasks/<taskId>/…`; public read is via Space bucket policy (or CDN env), not per-upload ACL. */
-export type S3Url = {
-  /** Public read URL for the uploaded object (for persisting after a successful PUT). */
-  publicUrl?: Maybe<Scalars['String']['output']>;
-  /** Time-limited HTTPS URL for a PUT upload to object storage. */
-  url?: Maybe<Scalars['String']['output']>;
-};
-
 export type SaveWorkerSetupStepInput = {
-  /** Profile avatar read URL (`profile.photo`; also use `updateMyProfile` if preferred). */
-  avatarUrl?: InputMaybe<Scalars['String']['input']>;
   bio?: InputMaybe<Scalars['String']['input']>;
   /** Private DOB on the user (`profile.details`). */
   dateOfBirth?: InputMaybe<Scalars['DateTime']['input']>;
@@ -2204,8 +2491,11 @@ export type Subscription = {
 export type Task = {
   /** Task budget. */
   budget?: Maybe<TaskBudget>;
-  /** Normalized task category used by discovery filters and cards. */
-  category: Scalars['String']['output'];
+  /**
+   * Open category tags (1 to 10), as the poster typed them. Search and
+   * `TaskFilter.category` match any of them, ignoring case.
+   */
+  categories: Array<Scalars['String']['output']>;
   /** When the task row was created. Persisted on `createTask`. */
   createdAt: Scalars['DateTime']['output'];
   /** Task date/time preference. */
@@ -2221,7 +2511,7 @@ export type Task = {
   id: Scalars['ID']['output'];
   /** Gallery image URLs; resolved from object storage under `tasks/<taskId>/` (not stored in MongoDB). */
   images: Array<Scalars['String']['output']>;
-  /** Coordinates and label. Full precision and street address for the poster and the accepted worker; discovery-style for public and pending-quote workers. */
+  /** Coordinates and label. Exact point and address for the poster and the accepted worker; town and public point for everyone else. Radius filters and distance sort use the public point. */
   location: TaskLocation;
   /**
    * The authenticated viewer's order on this task, if they are customer or worker. Null for guests or non-parties.
@@ -2231,20 +2521,44 @@ export type Task = {
   /**
    * Poster (task owner). Always resolves when task data is available.
    * Public and pending-quote viewers get the redacted `User` shell (name and
-   * avatar via the same helper as `Query.user`; email blanked). Assigned
-   * workers see contact fields. For a profile peek whose schema cannot request
-   * private fields, use `user(id:)`.
+   * avatar via the same helper as `Query.user`; email blanked). The accepted
+   * worker (accepted quote or live order) also gets the poster's `email` and
+   * verified flags; owner-only fields (orders, threads, achievements, settings,
+   * pending contact changes, verification timestamps) stay empty for them. For a
+   * profile peek whose schema cannot request private fields, use `user(id:)`.
    */
   poster?: Maybe<User>;
   /**
-   * Latest active quote per worker (EXPIRED and WITHDRAWN omitted).
-   * Visible to any authenticated viewer; guests get an empty list.
-   * `price` is non-null for the poster and for the worker who sent that quote.
+   * The latest quote per worker, newest first (EXPIRED and WITHDRAWN never
+   * appear). Every quote returned has its price, times and message; who sent it
+   * (`Quote.workerUserId`, `Quote.worker`) is only there for the task owner and
+   * for the viewer's own quote.
+   * - Task owner, and ops through the admin queries (`adminTask`,
+   *   `adminTasks`, `adminUpdateTask`): every worker's quote, any status, with
+   *   the worker.
+   * - Everyone else, guests included: while the task is OPEN, the PENDING
+   *   quotes without the worker, plus the viewer's own quote at any status.
+   *   Once the task is not OPEN (booked or cancelled), only the viewer's own
+   *   quote; guests get an empty list.
    */
   quotes: Array<Quote>;
   /** Workflow status of the task. */
   status: TaskStatus;
-  /** `timeline` is a list of events that have occurred on the task. It is used to track the history of the task and to display the timeline of the task. */
+  /**
+   * The task's activity log, oldest first: one entry per event, resolved for
+   * the viewer when read. Chat messages are not events.
+   * - Task owner, and ops through the admin queries: every event, with
+   *   `actor` and `worker`.
+   * - Everyone else, guests included:
+   *   - task created, edited and cancelled, with the poster as `actor` (an ops
+   *     edit has no `actor`);
+   *   - every quote event, without `actor` or `worker`, unless it is about the
+   *     viewer's own quote. `QUOTE_ACCEPTED` is the "booked" line;
+   *   - booking events (reschedule and cancellation requests and their
+   *     answers, withdrawals and lapses, done, failed, conflict, completed,
+   *     cancelled booking, reviews) only on the viewer's own booking, with the
+   *     owner as `actor` on the owner's events.
+   */
   timeline: Array<TaskTimelineEvent>;
   /** Short title shown in lists and search. */
   title: Scalars['String']['output'];
@@ -2319,6 +2633,22 @@ export enum TaskDateTimeType {
 }
 
 /**
+ * A task field that an edit can change. `STATUS` and `HIDDEN` only change in an
+ * ops edit.
+ */
+export enum TaskEditableField {
+  Budget = 'BUDGET',
+  Categories = 'CATEGORIES',
+  ContactMethod = 'CONTACT_METHOD',
+  Datetime = 'DATETIME',
+  Description = 'DESCRIPTION',
+  Hidden = 'HIDDEN',
+  Location = 'LOCATION',
+  Status = 'STATUS',
+  Title = 'TITLE'
+}
+
+/**
  * Shared list filter for discovery `tasks` and My Tasks hub lists
  * (`User.tasksPosted`, `User.quotedTasks`, `worker.quotedTasks`).
  *
@@ -2340,7 +2670,7 @@ export type TaskFilter = {
    * (one-off, per hour, per day). Must be >= 0 and <= `budgetMax` (`INVALID_BUDGET_RANGE`).
    */
   budgetMin?: InputMaybe<Scalars['Float']['input']>;
-  /** Optional category filter (case-insensitive exact match on the stored category string). */
+  /** Tasks that have this category: case-insensitive exact match on any of `categories`. */
   category?: InputMaybe<Scalars['String']['input']>;
   /** Inclusive lower bound on `createdAt` (`createdAt >= value`). */
   createdAfter?: InputMaybe<Scalars['DateTime']['input']>;
@@ -2373,7 +2703,7 @@ export type TaskFilter = {
    * On discovery `tasks`, FLEXIBLE and undated tasks still match; My Tasks lists exclude them.
    */
   scheduledBefore?: InputMaybe<Scalars['DateTime']['input']>;
-  /** Case-insensitive substring match on title, description, place name, and category. */
+  /** Case-insensitive substring match on title, description, place name, and any category. */
   search?: InputMaybe<Scalars['String']['input']>;
   /** Poster/worker inbox: constrain by task status(es). Omit for all statuses. Ignored by `tasks`. */
   status?: InputMaybe<Array<TaskStatus>>;
@@ -2381,13 +2711,16 @@ export type TaskFilter = {
 
 /** Map-backed coordinates and place label used for discovery and distance. */
 export type TaskLocation = {
-  /** Full street address for the task location. */
+  /** Exact address. Participants only; null for everyone else. */
   address?: Maybe<Scalars['String']['output']>;
-  /** Latitude in decimal degrees (may be rounded for public listings). */
+  /**
+   * Latitude. Exact for participants; for everyone else a fixed public point up
+   * to about 250 m from the real one (the same on every request).
+   */
   lat?: Maybe<Scalars['Float']['output']>;
-  /** Longitude in decimal degrees (may be rounded for public listings). */
+  /** Longitude. Same rule as `lat`. */
   lng?: Maybe<Scalars['Float']['output']>;
-  /** Place name or label; obfuscated for non-participants on search. */
+  /** Town or locality only (e.g. "Bushey"), for everyone. Stored that way on save. */
   name?: Maybe<Scalars['String']['output']>;
 };
 
@@ -2451,16 +2784,95 @@ export enum TaskStatus {
   Open = 'OPEN'
 }
 
+/**
+ * One line of a task's activity log: what happened, who did it, and when.
+ * `Task.timeline` decides per viewer which lines they get and who they see.
+ */
 export type TaskTimelineEvent = {
-  actor: User;
+  /**
+   * Who did it. Null when the viewer may not know (another worker's quote
+   * event, the booked line, an ops edit), and when nobody did
+   * (`QUOTE_NOT_SELECTED`, `CANCELLATION_LAPSED`, an automatic
+   * `ORDER_COMPLETED`).
+   */
+  actor?: Maybe<User>;
+  /** True when the viewer did it. */
+  byViewer: Scalars['Boolean']['output'];
+  /** `TASK_UPDATED`: the fields that changed. Empty for every other type. */
+  changedFields: Array<TaskEditableField>;
+  /**
+   * `TASK_UPDATED`: `{ fields }` with the changed field names, plus
+   * `admin: true` for an ops edit. `{}` for every other type.
+   * @deprecated Use `changedFields`.
+   */
   data: Scalars['JSON']['output'];
   timestamp: Scalars['DateTime']['output'];
   type: TaskTimelineEventType;
+  /**
+   * The worker a quote or booking event is about. Only the task owner (and
+   * ops) and that worker get it; null for everyone else and on task events.
+   */
+  worker?: Maybe<User>;
 };
 
+/**
+ * What happened. Quote and booking events have the same names as the Messages
+ * flashes they come with (`FlashKind`), except that both kinds of quote send
+ * are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `CANCELLATION_WITHDRAWN`
+ * and `CANCELLATION_LAPSED` are in the log only, with no flash.
+ */
 export enum TaskTimelineEventType {
+  /** The actor refused the other party's request to cancel. */
+  CancellationDeclined = 'CANCELLATION_DECLINED',
+  /** A request to cancel lapsed unanswered at the booked start. No actor. */
+  CancellationLapsed = 'CANCELLATION_LAPSED',
+  /** The actor asked to cancel the booking. */
+  CancellationRequested = 'CANCELLATION_REQUESTED',
+  /** The actor withdrew their own request to cancel. */
+  CancellationWithdrawn = 'CANCELLATION_WITHDRAWN',
+  /**
+   * The booking was cancelled: the actor accepted the other party's request to
+   * cancel, or both parties marked it failed (the actor second).
+   */
+  OrderCancelled = 'ORDER_CANCELLED',
+  /**
+   * The job is completed: both parties marked it done (the actor second), or
+   * 7 days passed after one did (no actor).
+   */
+  OrderCompleted = 'ORDER_COMPLETED',
+  /** One party marked the job done and the other failed (the actor second). */
+  OrderConflict = 'ORDER_CONFLICT',
+  /** The actor marked the job done; the other party has 7 days to answer. */
+  OrderMarkedDone = 'ORDER_MARKED_DONE',
+  /** The actor marked the job failed. The reason is never in the log. */
+  OrderMarkedFailed = 'ORDER_MARKED_FAILED',
+  /** The owner accepted a quote: the task is booked. */
+  QuoteAccepted = 'QUOTE_ACCEPTED',
+  /** The owner declined a quote. */
+  QuoteDeclined = 'QUOTE_DECLINED',
+  /** The owner accepted another quote, so this one was not selected. No actor. */
+  QuoteNotSelected = 'QUOTE_NOT_SELECTED',
+  /** A worker sent a quote. */
+  QuoteSent = 'QUOTE_SENT',
+  /** A worker replaced their pending quote with a new one. */
+  QuoteUpdated = 'QUOTE_UPDATED',
+  /** A worker withdrew their pending quote. */
+  QuoteWithdrawn = 'QUOTE_WITHDRAWN',
+  /** The actor accepted the other party's new time. */
+  RescheduleConfirmed = 'RESCHEDULE_CONFIRMED',
+  /** The actor declined the other party's new time; the booking keeps its time. */
+  RescheduleDeclined = 'RESCHEDULE_DECLINED',
+  /** The actor asked to move the booking to a new time. */
+  RescheduleRequested = 'RESCHEDULE_REQUESTED',
+  /** The actor withdrew their own request for a new time. */
+  RescheduleWithdrawn = 'RESCHEDULE_WITHDRAWN',
+  /** The actor left a review. The log never has the stars or the text. */
+  ReviewLeft = 'REVIEW_LEFT',
+  /** The poster cancelled the task before anyone was booked. */
   TaskCancelled = 'TASK_CANCELLED',
+  /** The poster posted the task. */
   TaskCreated = 'TASK_CREATED',
+  /** The task was edited (`changedFields`). */
   TaskUpdated = 'TASK_UPDATED'
 }
 
@@ -2469,6 +2881,11 @@ export enum TaskTimelineEventType {
  * `visibleTo` includes them.
  */
 export type Thread = {
+  /**
+   * The next step waiting on the viewer. Null when nothing is waiting, including
+   * on a system thread and for a worker who was not awarded the task.
+   */
+  attention?: Maybe<ThreadAttention>;
   /** The viewer blocked `otherParty`. */
   blockedByMe: Scalars['Boolean']['output'];
   /**
@@ -2497,6 +2914,23 @@ export type Thread = {
   updatedAt: Scalars['DateTime']['output'];
 };
 
+export type ThreadAttention = {
+  /** Live pending quotes when `kind` is `COMPARE_QUOTES`. Null otherwise. */
+  count?: Maybe<Scalars['Int']['output']>;
+  kind: ThreadAttentionKind;
+};
+
+/** Why a thread is waiting on the viewer. Matches My tasks' Needs you list. */
+export enum ThreadAttentionKind {
+  AnswerCancel = 'ANSWER_CANCEL',
+  AnswerFailed = 'ANSWER_FAILED',
+  AnswerReschedule = 'ANSWER_RESCHEDULE',
+  CompareQuotes = 'COMPARE_QUOTES',
+  ConfirmDone = 'CONFIRM_DONE',
+  Conflict = 'CONFLICT',
+  MarkDone = 'MARK_DONE'
+}
+
 export type ThreadItem = {
   /** Message author or flash actor. Null for system flashes. */
   author?: Maybe<ThreadParty>;
@@ -2510,6 +2944,18 @@ export type ThreadItem = {
   /** The viewer wrote the message or raised the flash. */
   isMine: Scalars['Boolean']['output'];
   orderId?: Maybe<Scalars['ID']['output']>;
+  /**
+   * The quote a quote flash is about (`QUOTE_RECEIVED`, `QUOTE_ACCEPTED`,
+   * `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`): price, message,
+   * slots, worker and its current `status`, read live. Only for the task owner
+   * and the quoting worker; null otherwise and for other flashes. The owner can
+   * act on a PENDING quote straight from the thread with `acceptQuote` (pick a
+   * `proposedSlots` id) or `declineQuote`. Every outcome flash carries the same
+   * quote, so a normalised client cache updates the original flash's status
+   * when the outcome arrives on `threadItemAdded`. After `QUOTE_ACCEPTED`, refetch
+   * the thread to see the other quotes become NOT_SELECTED.
+   */
+  quote?: Maybe<Quote>;
   quoteId?: Maybe<Scalars['ID']['output']>;
   taskId?: Maybe<Scalars['ID']['output']>;
   threadId: Scalars['ID']['output'];
@@ -2538,13 +2984,23 @@ export enum ThreadKind {
 }
 
 /**
- * A person shown in Messages. A user whose account is gone shows as
- * `name: "user is already deleted"` with `deleted: true` and no avatar.
+ * A person shown in Messages. A deleted account shows as `name: "Deleted user"`
+ * with `deleted: true` and no avatar.
  */
 export type ThreadParty = {
   avatarUrl?: Maybe<Scalars['String']['output']>;
+  /** Completed bookings this person did as the worker. 0 when the account is deleted. */
+  completedJobsCount: Scalars['Int']['output'];
   deleted: Scalars['Boolean']['output'];
+  /** Completed bookings this person posted. 0 when the account is deleted. */
+  hostedCompletedCount: Scalars['Int']['output'];
   name: Scalars['String']['output'];
+  /**
+   * Unlocked reviews about this person, the same summary as the public profile.
+   * `average` stays null until `count` is at least 3. A deleted account is
+   * `{ average: null, count: 0 }`.
+   */
+  ratingSummary: WorkerRatingSummary;
   userId: Scalars['ID']['output'];
 };
 
@@ -2567,8 +3023,6 @@ export type TimeSlotInput = {
 };
 
 export type UpdateMyProfileInput = {
-  /** Public read URL for the uploaded avatar (see `getProfileAvatarUpload`). */
-  avatarUrl?: InputMaybe<Scalars['String']['input']>;
   /** Worker bio (persisted on the canonical worker document). */
   bio?: InputMaybe<Scalars['String']['input']>;
   /**
@@ -2604,8 +3058,8 @@ export type UpdateReviewInput = {
 export type UpdateTaskInput = {
   /** Budget and currency. */
   budget?: InputMaybe<TaskBudgetInput>;
-  /** Product-defined task category (for example cleaning, moving, repairs). */
-  category?: InputMaybe<Scalars['String']['input']>;
+  /** Replaces all categories. Same rules as `CreateTaskInput.categories`. */
+  categories?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Date and time preference (before/flexible/exact). Pass null to clear. */
   datetime?: InputMaybe<TaskDateTimeInput>;
   /** Detailed description of the job. */
@@ -2618,8 +3072,47 @@ export type UpdateTaskInput = {
   title?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** The finished-profile editor. Same fields the Account profile form saves. */
+export type UpdateWorkerProfileInput = {
+  bio: Scalars['String']['input'];
+  legalName: Scalars['String']['input'];
+  location: LocationInput;
+  portfolioUrls: Array<Scalars['String']['input']>;
+  primaryCategory: WorkerPrimaryCategory;
+  qualifications: Array<Scalars['String']['input']>;
+  skills: Array<Scalars['String']['input']>;
+  tagline: Scalars['String']['input'];
+  travelRadiusMiles?: InputMaybe<Scalars['Float']['input']>;
+  yearsExperience: Scalars['Int']['input'];
+};
+
 export type User = {
+  /**
+   * Address on the linked Apple account, including a Hide My Email relay. This
+   * is only the mapping for that login. It is not `email`, and it does not have
+   * to match `email`. Null when Apple is not linked. Owner (`me`) and admin only.
+   */
+  appleLoginEmail?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['DateTime']['output'];
+  /**
+   * True once the account has been deleted (anonymised on day 30). The profile
+   * then shows as "Deleted user" with no avatar: don't link to it. False while a
+   * deletion is only scheduled.
+   */
+  deleted: Scalars['Boolean']['output'];
+  /**
+   * Why `requestAccountDeletion` would refuse, before the dialog. Empty when
+   * nothing blocks it. Re-auth is still required at the mutation. Owner only
+   * (`me`); empty for every other viewer.
+   */
+  deletionBlockers: Array<AccountDeletionBlocker>;
+  /**
+   * Set while the owner's account deletion is pending: the account is disabled
+   * and will be anonymised at this time unless `restoreAccount` is called. Every
+   * `@auth` action except `Query.me` and `restoreAccount` returns
+   * `ACCOUNT_DELETION_SCHEDULED`. Owner and admin only.
+   */
+  deletionScheduledFor?: Maybe<Scalars['DateTime']['output']>;
   /**
    * When true, `@auth` actions are rejected with `ACCOUNT_DISABLED` except
    * `Query.me` (so clients can show a suspended state). Password and Google
@@ -2627,13 +3120,33 @@ export type User = {
    * Set by ops via `adminSetUserDisabled`.
    */
   disabled: Scalars['Boolean']['output'];
+  /**
+   * The real address for the account owner (`me`), admins, and the accepted
+   * worker reading `Task.poster`. An empty string for every other viewer,
+   * including the task owner reading `Quote.worker`.
+   */
   email: Scalars['String']['output'];
   /** Whether this account's email address has been verified (`emailVerifiedAt` is set). */
   emailVerified: Scalars['Boolean']['output'];
   /** When the email was verified. Null until verified. */
   emailVerifiedAt?: Maybe<Scalars['DateTime']['output']>;
-  /** `PASSWORD` when a password is set, `GOOGLE` / `APPLE` when that account is linked. */
+  /**
+   * `PASSWORD` when a password is set, `GOOGLE` / `APPLE` when that account is linked.
+   * Owner (`me`) and admin only; empty for every other viewer.
+   */
   enabledLoginMethods: Array<LoginMethod>;
+  /**
+   * Address on the linked Google account. This is only the mapping for that
+   * login. It is not `email`, and it does not have to match `email`. Null when
+   * Google is not linked. Owner (`me`) and admin only.
+   */
+  googleLoginEmail?: Maybe<Scalars['String']['output']>;
+  /**
+   * Public trust signal for every viewer: orders with status `COMPLETED` where
+   * this account is the customer. Same number as
+   * `taskAchievements.customer.hostedCompletedCount`. 0 for deleted accounts.
+   */
+  hostedCompletedCount: Scalars['Int']['output'];
   /**
    * Distinct category strings on this user's My Tasks hub: tasks they posted,
    * plus tasks they still have a product-visible quote on. Unfiltered, so category
@@ -2664,6 +3177,15 @@ export type User = {
    * Prefer over nested `worker.quotedTasks` when `me.worker` may be null.
    */
   quotedTasks: Array<Task>;
+  /**
+   * Workers this account saved, newest first. Owner-only (`me`); empty for every
+   * other viewer. A worker who is no longer public is left out.
+   */
+  savedWorkers: Array<Worker>;
+  /**
+   * Owner (`me`) and admin only. Every other viewer gets the default shell
+   * (`isProfilePrivate: true`, `marketingEmails: false`, default language).
+   */
   settings: UserSettings;
   /**
    * My Tasks achievements for the authenticated owner (`me`).
@@ -2686,6 +3208,11 @@ export type User = {
   threads: Array<Thread>;
   /** Unread items across all threads (the Messages badge). Owner-only (`me`); 0 for others. */
   unreadMessageCount: Scalars['Int']['output'];
+  /**
+   * The user's worker profile. Null for other viewers until worker setup is
+   * complete, as in the directory and `PublicUser.worker`; the user themself
+   * and admins also see a profile still in setup.
+   */
   worker?: Maybe<Worker>;
   /**
    * True when the user satisfies worker-eligibility requirements. Only meaningful
@@ -2744,7 +3271,7 @@ export type WebPushSubscription = {
 export type WorkerCompletedJob = {
   /** Approximate area only (borough/city) — same redaction as public task views. */
   areaLabel?: Maybe<Scalars['String']['output']>;
-  category: Scalars['String']['output'];
+  categories: Array<Scalars['String']['output']>;
   completedAt: Scalars['DateTime']['output'];
   /**
    * Stars from the customer's unlocked review of this job. Null until that
@@ -2756,7 +3283,6 @@ export type WorkerCompletedJob = {
   title: Scalars['String']['output'];
 };
 
-/** How the viewer can contact this worker from the profile page. */
 export enum WorkerContactAction {
   /** No existing relationship — contact unlocks after accepting a quote on a task. */
   AcceptQuoteFirst = 'ACCEPT_QUOTE_FIRST',
@@ -2853,18 +3379,42 @@ export enum WorkerPrimaryCategory {
   Removals = 'REMOVALS'
 }
 
+export enum WorkerProfileGap {
+  Bio = 'BIO',
+  Headline = 'HEADLINE',
+  Photo = 'PHOTO',
+  Portfolio = 'PORTFOLIO',
+  ServiceArea = 'SERVICE_AREA',
+  Skills = 'SKILLS'
+}
+
 /**
  * Viewer-specific worker profile context (`worker.viewer`). Null for anonymous
  * viewers; drives the Save / Leave a review / Contact states on the profile page.
  */
 export type WorkerProfileViewer = {
-  /** True when the viewer has a completed (closed) job with this worker. */
+  /**
+   * True when the viewer still has a completed job with this worker that they
+   * have not reviewed. False once every finished job is reviewed. There is no
+   * separate deadline for a first review; the 48-hour window only limits edits.
+   */
   canLeaveReview: Scalars['Boolean']['output'];
   contactAction: WorkerContactAction;
   isSaved: Scalars['Boolean']['output'];
   relatedQuoteId?: Maybe<Scalars['ID']['output']>;
   relatedTaskId?: Maybe<Scalars['ID']['output']>;
+  /** Newest unreviewed completed job with this worker. Null when `canLeaveReview` is false. */
+  reviewOrderId?: Maybe<Scalars['ID']['output']>;
+  /** Task for `reviewOrderId`. */
+  reviewTaskId?: Maybe<Scalars['ID']['output']>;
 };
+
+/** How the viewer can contact this worker from the profile page. */
+export enum WorkerPublishState {
+  Draft = 'DRAFT',
+  Hidden = 'HIDDEN',
+  Published = 'PUBLISHED'
+}
 
 /**
  * Public reviews of this worker. `count` is how many are unlocked.
@@ -2972,8 +3522,13 @@ export type WorkerTaskAchievements = {
 
 export type Worker = {
   bio?: Maybe<Scalars['String']['output']>;
-  /** Completed (customer-confirmed) platform jobs, newest first. Empty when none. */
+  /**
+   * Completed platform jobs, newest first. `first` limits the page (at most 100).
+   * Omit it to return every row.
+   */
   completedJobs: Array<WorkerCompletedJob>;
+  /** Completed platform jobs, including rows past `first`. */
+  completedJobsCount: Scalars['Int']['output'];
   /** Reference earnings summary (not payouts). Viewer must be the worker. */
   earnings: WorkerEarnings;
   /**
@@ -2993,10 +3548,16 @@ export type Worker = {
    * identity verification is `VERIFIED`.
    */
   isVerified: Scalars['Boolean']['output'];
-  /** Worker's legal name. */
+  /**
+   * Worker's legal name. The worker themself and the admin dossier (which reads
+   * this profile as self). Everyone else gets null.
+   */
   legalName?: Maybe<Scalars['String']['output']>;
+  /** Base town (stored town-only). Same value as `preferredLocation.name`. */
   locationAddress?: Maybe<Scalars['String']['output']>;
+  /** Exact for the worker; the public point for everyone else. */
   locationLat?: Maybe<Scalars['Float']['output']>;
+  /** Exact for the worker; the public point for everyone else. */
   locationLng?: Maybe<Scalars['Float']['output']>;
   /** When the worker joined Slashie (linked user's registration date). */
   memberSince?: Maybe<Scalars['DateTime']['output']>;
@@ -3011,13 +3572,25 @@ export type Worker = {
   /** Optional portfolio image URLs (setup step `verify.portfolio`). */
   portfolioUrls: Array<Scalars['String']['output']>;
   /**
-   * Approximate base location shown on maps and the profile. `lat`/`lng`/`name`
-   * are public; `address` is only returned to the worker themself.
+   * Base location. `name` is the town. The worker gets the exact point and
+   * `address`; everyone else gets a fixed public point up to about 250 m away and
+   * no `address`. Geo search matches on the public point.
    */
   preferredLocation: Location;
   /** Primary trade chosen at setup (`services.skills`). Null until chosen. */
   primaryCategory?: Maybe<WorkerPrimaryCategory>;
   profile: Profile;
+  /**
+   * What the profile could still add, using the same floors as the edit form
+   * (headline 10, bio 80, 3 skills; a CJK character counts as two). Portfolio
+   * last. Empty when nothing is missing.
+   */
+  profileGaps: Array<WorkerProfileGap>;
+  /**
+   * Draft until setup is finished. Hidden when the account profile is private.
+   * Published otherwise. Same order as the Profile page.
+   */
+  publishState: WorkerPublishState;
   /**
    * Qualifications and certifications (setup step `services.experience`), e.g.
    * "City & Guilds", "NICEIC", "Gas Safe". Public labels only — no documents.
@@ -3065,6 +3638,11 @@ export type Worker = {
 };
 
 
+export type WorkerCompletedJobsArgs = {
+  first?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
 export type WorkerQuotedTasksArgs = {
   filter?: InputMaybe<TaskFilter>;
   sort?: InputMaybe<TaskSort>;
@@ -3084,11 +3662,11 @@ export type MeQuery = { me: { id: string, email: string, emailVerified: boolean,
 
 export type UserAdminFieldsFragment = { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null };
 
-export type TaskListFieldsFragment = { id: string, title: string, description: string, category: string, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null };
+export type TaskListFieldsFragment = { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null };
 
 export type WorkerAdminFieldsFragment = { id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } };
 
-export type AdminTaskDossierFieldsFragment = { task: { id: string, title: string, description: string, category: string, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> };
+export type AdminTaskDossierFieldsFragment = { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> };
 
 export type AdminTasksQueryVariables = Exact<{
   filter?: InputMaybe<AdminTaskFilter>;
@@ -3097,14 +3675,14 @@ export type AdminTasksQueryVariables = Exact<{
 }>;
 
 
-export type AdminTasksQuery = { adminTasks: { nextCursor?: string | null, items: Array<{ id: string, title: string, description: string, category: string, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }> } };
+export type AdminTasksQuery = { adminTasks: { nextCursor?: string | null, items: Array<{ id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }> } };
 
 export type AdminTaskQueryVariables = Exact<{
   id: Scalars['ID']['input'];
 }>;
 
 
-export type AdminTaskQuery = { adminTask: { task: { id: string, title: string, description: string, category: string, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> } };
+export type AdminTaskQuery = { adminTask: { task: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null }, poster?: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } | null, workers: Array<{ id: string, userId: string, legalName?: string | null, bio?: string | null, tagline?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, qualifications: Array<string>, quotesSentCount: number, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, user: { id: string, email: string }, preferredLocation: { name?: string | null, lat?: number | null, lng?: number | null }, serviceArea: { label?: string | null, radiusMiles?: number | null }, ratingSummary: { average?: number | null, count: number } }>, quotes: Array<{ id: string, status: QuoteStatus, message?: string | null, createdAt: any, price?: { amount: number, currency: Currency } | null, worker?: { id: string, email: string, profile: { name?: string | null }, worker?: { id: string, legalName?: string | null, isVerified: boolean, profile: { name?: string | null } } | null } | null }>, orders: Array<{ id: string, status: OrderStatus, createdAt: any, workerUserId: string, customerUserId: string, quoteId: string, bookedStart: any, bookedEnd?: any | null, autoDoneAt?: any | null, closedAt?: any | null, agreedPrice: { amount: number, currency: Currency }, pendingRequest?: { kind: OrderRequestKind, requestedByUserId: string, requestedAt: any } | null, rescheduleHistory: Array<{ previousStart: any, start: any, requestedByUserId: string, confirmedAt: any }> }>, activity: Array<{ source: AdminTaskActivitySource, type: string, title?: string | null, body?: string | null, createdAt: any, actorUserId?: string | null, visibleToUserIds: Array<string>, quoteId?: string | null, orderId?: string | null }> } };
 
 export type AdminUsersQueryVariables = Exact<{
   search?: InputMaybe<Scalars['String']['input']>;
@@ -3125,7 +3703,7 @@ export type AdminUserDetailQueryVariables = Exact<{
 }>;
 
 
-export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, category: string }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null }> } };
+export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null }> } };
 
 export type AdminUpdateTaskMutationVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -3133,7 +3711,7 @@ export type AdminUpdateTaskMutationVariables = Exact<{
 }>;
 
 
-export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, category: string, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null } };
+export type AdminUpdateTaskMutation = { adminUpdateTask: { id: string, title: string, description: string, categories: Array<string>, status: TaskStatus, views: number, hidden: boolean, datetime?: { date?: string | null, time?: string | null, type: TaskDateTimeType } | null, budget?: { amount: number, currency: Currency, type: TaskBudgetType, paymentMethod: TaskPaymentMethod } | null, location: { lat?: number | null, lng?: number | null, name?: string | null, address?: string | null }, poster?: { id: string, email: string, profile: { name?: string | null, avatarUrl?: string | null } } | null } };
 
 export type AdminUpdateUserMutationVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -3209,3 +3787,10 @@ export type AdminOpsSummaryQueryVariables = Exact<{
 
 
 export type AdminOpsSummaryQuery = { adminOpsSummary: { range: AdminOpsRange, dateFrom: any, dateTo: any, previousDateFrom: any, previousDateTo: any, openReports: number, hiddenTasks: number, disabledUsers: number, newUsers: { current: number, previous: number, percentChange?: number | null }, tasksCreated: { current: number, previous: number, percentChange?: number | null }, workersRegistered: { current: number, previous: number, percentChange?: number | null }, quotesSent: { current: number, previous: number, percentChange?: number | null }, quotesAccepted: { current: number, previous: number, percentChange?: number | null }, quotesDeclined: { current: number, previous: number, percentChange?: number | null }, ordersOpened: { current: number, previous: number, percentChange?: number | null }, jobsCompleted: { current: number, previous: number, percentChange?: number | null }, reportsSubmitted: { current: number, previous: number, percentChange?: number | null }, tasksByStatus: Array<{ status: TaskStatus, count: number }> } };
+
+export type PopularTaskCategoriesQueryVariables = Exact<{
+  first?: InputMaybe<Scalars['Int']['input']>;
+}>;
+
+
+export type PopularTaskCategoriesQuery = { popularTaskCategories: Array<string> };

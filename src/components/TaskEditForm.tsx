@@ -12,7 +12,6 @@ import {
   taskToFormValues,
   type TaskEditFormValues,
 } from '@/lib/taskInput'
-import { TASK_CATEGORIES } from '@/lib/taskList'
 import { Currency, TaskBudgetType, TaskPaymentMethod } from '@codegen/schema'
 import type {
   AdminTasksQuery,
@@ -151,23 +150,14 @@ export function TaskEditForm({ taskId, hidePageHead }: Props) {
           </select>
         </label>
         <label className="field">
-          Category
-          <select
+          Categories
+          <input
             className="input"
-            value={values.category}
-            onChange={(e) => patch('category', e.target.value)}
-          >
-            {TASK_CATEGORIES.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-            {TASK_CATEGORIES.includes(
-              values.category as (typeof TASK_CATEGORIES)[number],
-            ) ? null : (
-              <option value={values.category}>{values.category}</option>
-            )}
-          </select>
+            value={values.categories}
+            onChange={(e) => patch('categories', e.target.value)}
+            placeholder="Plumbing, Leaky tap"
+          />
+          <span className="meta">Comma-separated, 1 to 10.</span>
         </label>
       </div>
 

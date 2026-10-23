@@ -142,6 +142,27 @@ type ActivityLike = {
   visibleToUserIds?: string[] | null
 }
 
+/** `RESCHEDULE_WITHDRAWN` → "Reschedule withdrawn" (task activity log types, BE-106). */
+export function timelineTitle(type: string | null | undefined): string {
+  const words = String(type ?? '').trim().toLowerCase().replace(/_/g, ' ')
+  return words ? words[0].toUpperCase() + words.slice(1) : 'Activity'
+}
+
+/** `{"fields":["BUDGET","DATETIME"]}` → "Changed: budget, datetime"; other JSON as is. */
+export function timelineBody(body: string | null | undefined): string {
+  const raw = body?.trim()
+  if (!raw) return ''
+  try {
+    const data = JSON.parse(raw) as { fields?: unknown }
+    if (Array.isArray(data.fields) && data.fields.length > 0) {
+      return `Changed: ${data.fields.map((field) => String(field).toLowerCase().replace(/_/g, ' ')).join(', ')}`
+    }
+  } catch {
+    // Not JSON: show it as sent.
+  }
+  return raw
+}
+
 export function activityFromDossier(
   activity: Array<ActivityLike | null | undefined> | null | undefined,
 ): ActivityRow[] {
@@ -158,10 +179,16 @@ export function activityFromDossier(
     ]
       .filter(Boolean)
       .join(' · ')
+    const timeline = kind === 'timeline'
     rows.push({
       id: `${kind}-${item.type}-${item.createdAt}-${rows.length}`,
-      title: item.title?.trim() || item.type || 'Activity',
-      body: [item.body?.trim(), meta].filter(Boolean).join(' · '),
+      // Timeline rows carry the raw event type as the title and JSON data as the body.
+      title: timeline
+        ? timelineTitle(item.type)
+        : item.title?.trim() || item.type || 'Activity',
+      body: [timeline ? timelineBody(item.body) : item.body?.trim(), meta]
+        .filter(Boolean)
+        .join(' · '),
       at: String(item.createdAt ?? ''),
       kind,
     })

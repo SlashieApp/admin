@@ -17,7 +17,7 @@ function params(query: string) {
 function task(partial: Partial<TaskListRow> & Pick<TaskListRow, 'id'>): TaskListRow {
   return {
     title: 'Leaky tap',
-    category: 'PLUMBING',
+    categories: ['Plumbing'],
     status: 'OPEN',
     views: 3,
     hidden: false,

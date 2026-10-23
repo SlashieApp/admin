@@ -31,21 +31,6 @@ export const TASK_STATUSES = [
 
 export const TASK_BUDGET_TYPES = ['ONE_OFF', 'PER_DAY', 'PER_HOUR'] as const
 
-export const TASK_CATEGORIES = [
-  'HANDYMAN',
-  'FURNITURE_ASSEMBLY',
-  'MOUNTING_INSTALLATION',
-  'PLUMBING',
-  'ELECTRICAL',
-  'CARPENTRY',
-  'PAINTING',
-  'CLEANING',
-  'GARDENING',
-  'REMOVALS',
-  'DELIVERY_ERRANDS',
-  'OTHER',
-] as const
-
 export type TaskStatusValue = (typeof TASK_STATUSES)[number]
 export type TaskStatusFilter = TaskStatusValue | 'ALL'
 export type TaskVisibilityFilter = 'all' | 'public' | 'hidden'
@@ -72,7 +57,8 @@ export type TaskListFilters = {
 export type TaskListRow = {
   id: string
   title: string
-  category: string
+  /** Open-text categories (BE-79). */
+  categories: readonly string[]
   status: string
   views?: number | null
   hidden?: boolean | null
@@ -213,7 +199,7 @@ export function taskSortValue(row: TaskListRow, key: string): unknown {
     case 'status':
       return row.status
     case 'category':
-      return row.category
+      return row.categories.join(', ')
     case 'poster':
       return row.poster?.profile?.name || row.poster?.email || ''
     case 'budget':

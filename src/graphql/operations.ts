@@ -73,7 +73,7 @@ const TASK_LIST_FIELDS = gql`
     id
     title
     description
-    category
+    categories
     status
     views
     hidden
@@ -289,7 +289,7 @@ export const AdminUserDetail = gql`
           id
           title
           status
-          category
+          categories
         }
       }
     }
@@ -510,5 +510,12 @@ export const AdminOpsSummary = gql`
         count
       }
     }
+  }
+`
+
+/** Category suggestions for the Tasks filter (categories are open text, BE-79). */
+export const PopularTaskCategories = gql`
+  query PopularTaskCategories($first: Int) {
+    popularTaskCategories(first: $first)
   }
 `

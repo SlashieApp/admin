@@ -274,7 +274,7 @@ export function UserDetail({ userId }: { userId: string }) {
                         <strong>{task.title}</strong>
                         <span className="pill">{task.status}</span>
                       </div>
-                      <p className="meta">{task.category}</p>
+                      <p className="meta">{task.categories.join(', ')}</p>
                     </Link>
                   </li>
                 ))}

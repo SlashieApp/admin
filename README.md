@@ -44,14 +44,15 @@ bun run codegen && bun run test
 | `adminTask(id): AdminTaskDossier` | Task dossier (task, poster, workers, quotes, orders, activity) |
 | `adminUsers(search, id, disabled, isWorker, createdAfter, createdBefore, first, after): UserPage` | Users table, user detail (with `tasksPosted`) |
 | `adminOpsSummary(range): AdminOpsSummary` | Dashboard |
+| `popularTaskCategories(first)` | Category suggestions on the Tasks filter |
 | `adminUpdateTask`, `adminUpdateUser`, `adminSetUserDisabled` | God-mode edits |
 | `adminReports(status, targetType, first, after): ReportPage` / `adminUpdateReportStatus` | Reports inbox |
 | `adminFeedbackSummary`, `adminFeedbacks(status, category, first, after)`, `adminUpdateFeedbackStatus`, `adminFeedbackDraftReply` (query) | Feedback inbox |
 
 Every list filter is sent to the API and lists page with `after` / `nextCursor`. Column sort orders the fetched page only. The panel has no filter the API cannot apply.
 
-- **Tasks**: search, status (`DRAFT | OPEN | AWARDED | CANCELLED`), hidden, category, poster (`posterSearch`), budget min/max/type, created date range, map viewport `bbox`. Job completion lives on `Order.status`, not the task.
-- **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`); chat messages are not included.
+- **Tasks**: search, status (`DRAFT | OPEN | AWARDED | CANCELLED`), hidden, category (one open-text category; suggestions from `popularTaskCategories`, since tasks carry 1 to 10 free-text `categories`), poster (`posterSearch`), budget min/max/type, created date range, map viewport `bbox`. Job completion lives on `Order.status`, not the task.
+- **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`, one row per event that raised no flash; the type is shown in words and `TASK_UPDATED` lists the changed fields); chat messages are not included.
 - **Reports**: status and target type (`TASK | WORKER | USER | REVIEW | MESSAGE`). Tasks and users link inside admin; workers and reviews link to the public `targetUrl`; `MESSAGE` rows show the reported text (`targetLabel`, no URL).
 - **Feedback**: status and category. Selecting an item loads `adminFeedbackDraftReply` (subject/body with Copy + optional `mailto:`). The panel does not send the reply.
 

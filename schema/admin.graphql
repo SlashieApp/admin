@@ -62,8 +62,8 @@ type Subscription {
 }
 
 """
-Ops allowlist row. Presence of an active document (plus @slashie.app email)
-is required for fields marked `@admin`. Not a marketplace user role.
+Ops allowlist row. `@admin` also requires a verified `@slashie.app` account
+whose id matches `userId` once the row is linked. Not a marketplace user role.
 """
 type Admin
   @entity(additionalFields: [{ path: "userId", type: "IdDoc['_id'] | null" }])
@@ -74,7 +74,8 @@ type Admin
   """
   email: String! @column
   """
-  Linked user id when known (set on first successful `@admin` call).
+  Linked user id. Set on the first successful `@admin` call by the verified
+  account with this email. Later calls must be that same user.
   """
   userId: ID
   """
@@ -106,7 +107,8 @@ input AdminTaskFilter {
   """
   hidden: Boolean
   """
-  Case-insensitive exact category match (same rule as public `TaskFilter.category`).
+  Tasks that have this category: case-insensitive exact match on any of
+  `categories` (same rule as public `TaskFilter.category`).
   """
   category: String
   """
@@ -175,7 +177,10 @@ Ignores poster ownership and OPEN/DRAFT restrictions. Input is still validated.
 input AdminUpdateTaskInput {
   title: String
   description: String
-  category: String
+  """
+  Replaces all categories. Same rules as `CreateTaskInput.categories`.
+  """
+  categories: [String!]
   budget: TaskBudgetInput
   location: TaskLocationInput
   """
@@ -191,8 +196,11 @@ input AdminUpdateTaskInput {
 }
 
 """
-Unified activity row for a task dossier. Flashes plus task timeline events,
-newest first. Chat messages are not included.
+Unified activity row for a task dossier, newest first, one row per event: the
+flash when the event raised one (with who could see it), otherwise the task
+timeline event (task edits, reviews, withdrawn or lapsed booking requests).
+Flashes that are not events, such as review prompts, are rows too. Chat
+messages are not included. The full typed log is `task.timeline`.
 """
 enum AdminTaskActivitySource {
   FLASH
@@ -216,8 +224,9 @@ type AdminTaskActivity {
 
 """
 Everything related to one task for ops. Prefer this over stitching public queries.
-Task is owner-shaped so location/address/hidden are visible. Quote amounts are
-included (marketplace `Quote.price` is visible to the poster and the quoting worker).
+Task is owner-shaped so location/address/hidden are visible. Quotes always
+come with the quoting worker (`Quote.workerUserId`, and `Quote.worker`
+including the email).
 """
 type AdminTaskDossier {
   task: Task!
@@ -715,9 +724,15 @@ enum FlashKind {
   QUOTE_ACCEPTED
   QUOTE_DECLINED
   """
-  The owner accepted another worker's quote. Only the non-selected worker sees it.
+  The owner accepted another worker's quote. Only the non-selected worker sees
+  it; it carries their quote (now NOT_SELECTED).
   """
   QUOTE_NOT_SELECTED
+  """
+  The worker withdrew their quote. Owner and worker see it; it carries the
+  quote (now WITHDRAWN).
+  """
+  QUOTE_WITHDRAWN
   RESCHEDULE_REQUESTED
   RESCHEDULE_CONFIRMED
   RESCHEDULE_DECLINED
@@ -758,14 +773,49 @@ enum PushPlatform {
 }
 
 """
-A person shown in Messages. A user whose account is gone shows as
-`name: "user is already deleted"` with `deleted: true` and no avatar.
+A person shown in Messages. A deleted account shows as `name: "Deleted user"`
+with `deleted: true` and no avatar.
 """
 type ThreadParty {
   userId: ID!
   name: String!
   avatarUrl: String
   deleted: Boolean!
+  """
+  Unlocked reviews about this person, the same summary as the public profile.
+  `average` stays null until `count` is at least 3. A deleted account is
+  `{ average: null, count: 0 }`.
+  """
+  ratingSummary: WorkerRatingSummary!
+  """
+  Completed bookings this person posted. 0 when the account is deleted.
+  """
+  hostedCompletedCount: Int!
+  """
+  Completed bookings this person did as the worker. 0 when the account is deleted.
+  """
+  completedJobsCount: Int!
+}
+
+"""
+Why a thread is waiting on the viewer. Matches My tasks' Needs you list.
+"""
+enum ThreadAttentionKind {
+  COMPARE_QUOTES
+  ANSWER_RESCHEDULE
+  ANSWER_CANCEL
+  MARK_DONE
+  CONFIRM_DONE
+  ANSWER_FAILED
+  CONFLICT
+}
+
+type ThreadAttention {
+  kind: ThreadAttentionKind!
+  """
+  Live pending quotes when `kind` is `COMPARE_QUOTES`. Null otherwise.
+  """
+  count: Int
 }
 
 """
@@ -821,6 +871,11 @@ type Thread
   The viewer blocked `otherParty`.
   """
   blockedByMe: Boolean!
+  """
+  The next step waiting on the viewer. Null when nothing is waiting, including
+  on a system thread and for a worker who was not awarded the task.
+  """
+  attention: ThreadAttention
   createdAt: DateTime! @column(overrideType: "Date")
   updatedAt: DateTime!
 }
@@ -864,6 +919,18 @@ type ThreadItem
   isMine: Boolean!
   taskId: ID
   quoteId: ID
+  """
+  The quote a quote flash is about (`QUOTE_RECEIVED`, `QUOTE_ACCEPTED`,
+  `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`): price, message,
+  slots, worker and its current `status`, read live. Only for the task owner
+  and the quoting worker; null otherwise and for other flashes. The owner can
+  act on a PENDING quote straight from the thread with `acceptQuote` (pick a
+  `proposedSlots` id) or `declineQuote`. Every outcome flash carries the same
+  quote, so a normalised client cache updates the original flash's status
+  when the outcome arrives on `threadItemAdded`. After `QUOTE_ACCEPTED`, refetch
+  the thread to see the other quotes become NOT_SELECTED.
+  """
+  quote: Quote
   orderId: ID
   createdAt: DateTime! @column(overrideType: "Date")
 }
@@ -1160,7 +1227,7 @@ type OrderLocationSnapshot {
 type OrderSnapshot {
   title: String!
   description: String!
-  category: String!
+  categories: [String!]!
   location: OrderLocationSnapshot!
   datetime: TaskDateTime
   contactMethod: String
@@ -1334,7 +1401,12 @@ type Pricing {
   priceCurrency: String!
   priceInterval: String!
   """
+  Charges every this many intervals. 3 with `priceInterval` month is every 3 months.
+  """
+  priceIntervalCount: Int!
+  """
   Free-trial length in days (e.g. 180 for a 6-month trial).
+  The Price's own trial when it has one, otherwise 180. Same source as Checkout.
   """
   trialDays: Int
   """
@@ -1369,15 +1441,26 @@ enum QuoteStatus {
   WITHDRAWN
   REJECTED
   """
-  Previous quote after an append overwrite, or a withdrawn quote.
-  Product reads omit EXPIRED rows.
+  Replaced by a newer quote from the same worker on the same task (its own
+  `QUOTE_RECEIVED` flash carries the new one). Product reads omit EXPIRED rows.
   """
   EXPIRED
+  """
+  The owner accepted another worker's quote on this task.
+  """
+  NOT_SELECTED
 }
 
+"""
+A worker's offer on a task. `Task.quotes` decides who sees which quotes. Every
+quote a viewer gets has its price, times and message; who sent it
+(`workerUserId`, `worker`) is only there for the task owner, that worker and
+ops.
+"""
 type Quote
   @entity(
     additionalFields: [
+      { path: "workerUserId", type: "IdDoc['_id']" }
       { path: "pricePence", type: "number" }
       { path: "priceCurrency", type: "string" }
       {
@@ -1389,13 +1472,30 @@ type Quote
 {
   id: ID! @id
   taskId: ID! @link
-  workerUserId: ID! @link
+  """
+  The quoting worker's user id. Only the task owner, that worker, and ops
+  (through the admin queries) get it. Null for everyone else, guests included.
+  """
+  workerUserId: ID
   task: Task!
-  worker: User!
+  """
+  The quoting worker. Same rule as `workerUserId`: the task owner, that
+  worker, and ops only; null for everyone else, guests included. `email` is
+  empty unless the viewer is that worker or the admin task dossier; the task
+  owner does not get it, even after accepting.
+  """
+  worker: User
+  """
+  The quoted amount, for anyone who can see the quote.
+  """
   price: Price
+  """
+  Pitch from the quoting worker, for anyone who can see the quote.
+  """
   message: String @column
   """
-  The worker's 1-2 exact slots. The owner picks one on `acceptQuote`.
+  The worker's 1-2 exact slots, for anyone who can see the quote. The owner
+  picks one on `acceptQuote`.
   """
   proposedSlots: [TimeSlot!]!
   status: QuoteStatus! @column
@@ -1421,18 +1521,21 @@ extend type Mutation {
   another slot. After withdraw, that task no longer counts until quoted again.
   Unlimited and Pro memberships bypass the cap.
   Blocked while this worker has an ACCEPTED quote on the task.
-  `QUOTE_RECEIVED` is emitted only for the first quote, not for append updates.
+  Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
   """
   addQuote(input: AddQuoteInput!): Quote! @auth
   """
-  Worker withdraws their own pending quote before it is accepted.
-  Sets every live quote for that task and worker to EXPIRED. Accepted quotes
-  cannot be withdrawn. The task drops out of the worker pipeline and
-  `Task.quotes`. A later `addQuote` inserts a new PENDING row.
+  Worker withdraws their own pending quote before it is accepted. That quote
+  becomes WITHDRAWN (any older live versions EXPIRED), and the owner and worker
+  get a `QUOTE_WITHDRAWN` flash. Accepted quotes cannot be withdrawn. The task
+  drops out of the worker pipeline and `Task.quotes`, and stops counting toward
+  the monthly quote limit. A later `addQuote` inserts a new PENDING row.
   """
   withdrawQuote(quoteId: ID!): Quote! @auth
   """
   Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
+  Works from Messages with a flash's `quoteId`. Raises `QUOTE_DECLINED` with the
+  quote.
   """
   declineQuote(quoteId: ID!): Quote! @auth
 }
@@ -1591,6 +1694,20 @@ type Review
   authorUserId: ID!
   subjectUserId: ID!
   authorRole: ReviewPartyRole! @column
+  """
+  First word of the author's public name. Null when the account is deleted
+  or has no name. Not the legal name.
+  """
+  authorFirstName: String
+  """
+  Author's public photo. Null when the account is deleted or has none.
+  """
+  authorAvatarUrl: String
+  """
+  Job title from the order snapshot, or the first category when the title
+  is empty.
+  """
+  jobTitle: String
   stars: Int! @column
   comment: String @column
   createdAt: DateTime! @column(overrideType: "Date")
@@ -1737,45 +1854,43 @@ extend type Mutation {
 }
 
 """
-Presigned upload URL (PUT). Task objects use prefix `tasks/<taskId>/…`; public read is via Space bucket policy (or CDN env), not per-upload ACL.
+One image upload (BE-83). PUT the file's bytes to `url`, then pass `uploadKey`
+to `finalizeTaskImage` or `finalizeAvatarUpload`. The upload is private, and
+one that is never finalized is deleted after about an hour.
 """
-type S3URL {
+type ImageUpload {
   """
-  Time-limited HTTPS URL for a PUT upload to object storage.
+  Time-limited presigned PUT URL. Any Content-Type; the server reads the bytes.
   """
-  url: String
+  url: String!
   """
-  Public read URL for the uploaded object (for persisting after a successful PUT).
+  Pass this to the finalize mutation.
   """
-  publicUrl: String
+  uploadKey: String!
 }
 
-extend type Query {
+extend type Mutation {
   """
-  Generates one pre-signed S3 PUT URL for uploading a task file; requires authentication.
-  Caller must be the task creator.
+  A new private upload for one image. Accepted images: JPEG, PNG, WebP,
+  HEIC/HEIF and AVIF, up to 15 MB and 100 megapixels.
   """
-  getTaskS3Upload(
-    """
-    Task id. Must belong to the authenticated user.
-    """
-    taskId: ID!
-    """
-    File key under `tasks/<taskId>/<index>` (for example `0.jpg`).
-    """
-    index: String!
-  ): [S3URL!]! @auth
+  createImageUpload: ImageUpload! @auth
   """
-  Generates a pre-signed S3 PUT URL for the authenticated user's profile avatar
-  under `users/<userId>/<filename>`. Persist `publicUrl` via `updateMyProfile`
-  after a successful upload.
+  Converts an upload into task photo `index` (0 to 9) and returns its public
+  URL. Stored as a JPEG: oriented, long edge at most 2048 px, all metadata
+  (GPS included) removed. Replaces any earlier photo in that slot. Task poster
+  only, while the task is OPEN or DRAFT. Errors: `UPLOAD_NOT_FOUND`,
+  `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `INVALID_INDEX`, `TASK_NOT_FOUND`,
+  `FORBIDDEN_TASK_UPLOAD`, `TASK_NOT_EDITABLE`.
   """
-  getProfileAvatarUpload(
-    """
-    File name under `users/<userId>/<filename>` (for example `avatar.jpg`).
-    """
-    filename: String!
-  ): S3URL! @auth
+  finalizeTaskImage(taskId: ID!, index: Int!, uploadKey: String!): String! @auth
+  """
+  Converts an upload into the caller's avatar (JPEG, long edge at most
+  1024 px, metadata removed), sets `avatarUrl` and deletes the previous
+  uploaded avatar. Errors: `UPLOAD_NOT_FOUND`, `IMAGE_TOO_LARGE`,
+  `UNSUPPORTED_IMAGE`.
+  """
+  finalizeAvatarUpload(uploadKey: String!): User! @auth
 }
 
 enum TaskContactMethod {
@@ -1810,19 +1925,20 @@ Map-backed coordinates and place label used for discovery and distance.
 """
 type TaskLocation {
   """
-  Latitude in decimal degrees (may be rounded for public listings).
+  Latitude. Exact for participants; for everyone else a fixed public point up
+  to about 250 m from the real one (the same on every request).
   """
   lat: Float
   """
-  Longitude in decimal degrees (may be rounded for public listings).
+  Longitude. Same rule as `lat`.
   """
   lng: Float
   """
-  Place name or label; obfuscated for non-participants on search.
+  Town or locality only (e.g. "Bushey"), for everyone. Stored that way on save.
   """
   name: String
   """
-  Full street address for the task location.
+  Exact address. Participants only; null for everyone else.
   """
   address: String
 }
@@ -1935,9 +2051,12 @@ type Task
       { path: "createdByUserId", type: "IdDoc['_id']" }
       { path: "contactMethod", type: "string | null" }
       { path: "createdAt", type: "Date" }
+      # Activity log, see `TaskTimelineEvent`. `workerUserId`, `quoteId` and
+      # `orderId` record who the event concerns, so visibility never depends on
+      # the current state. `actorUserId` is null for system events.
       {
         path: "timeline"
-        type: "{ type: string, timestamp: Date, actorUserId: IdDoc['_id'], data: Record<string, unknown> }[]"
+        type: "{ type: string, timestamp: Date, actorUserId: IdDoc['_id'] | null, workerUserId: IdDoc['_id'] | null, quoteId: IdDoc['_id'] | null, orderId: IdDoc['_id'] | null, data: Record<string, unknown> }[]"
       }
     ]
   )
@@ -1955,9 +2074,10 @@ type Task
   """
   description: String! @column
   """
-  Normalized task category used by discovery filters and cards.
+  Open category tags (1 to 10), as the poster typed them. Search and
+  `TaskFilter.category` match any of them, ignoring case.
   """
-  category: String! @column
+  categories: [String!]! @column
   """
   Task budget.
   """
@@ -1985,26 +2105,48 @@ type Task
   """
   createdAt: DateTime!
   """
-  `timeline` is a list of events that have occurred on the task. It is used to track the history of the task and to display the timeline of the task.
+  The task's activity log, oldest first: one entry per event, resolved for
+  the viewer when read. Chat messages are not events.
+  - Task owner, and ops through the admin queries: every event, with
+    `actor` and `worker`.
+  - Everyone else, guests included:
+    - task created, edited and cancelled, with the poster as `actor` (an ops
+      edit has no `actor`);
+    - every quote event, without `actor` or `worker`, unless it is about the
+      viewer's own quote. `QUOTE_ACCEPTED` is the "booked" line;
+    - booking events (reschedule and cancellation requests and their
+      answers, withdrawals and lapses, done, failed, conflict, completed,
+      cancelled booking, reviews) only on the viewer's own booking, with the
+      owner as `actor` on the owner's events.
   """
   timeline: [TaskTimelineEvent!]! @column
 
   """
   Poster (task owner). Always resolves when task data is available.
   Public and pending-quote viewers get the redacted `User` shell (name and
-  avatar via the same helper as `Query.user`; email blanked). Assigned
-  workers see contact fields. For a profile peek whose schema cannot request
-  private fields, use `user(id:)`.
+  avatar via the same helper as `Query.user`; email blanked). The accepted
+  worker (accepted quote or live order) also gets the poster's `email` and
+  verified flags; owner-only fields (orders, threads, achievements, settings,
+  pending contact changes, verification timestamps) stay empty for them. For a
+  profile peek whose schema cannot request private fields, use `user(id:)`.
   """
   poster: User
   """
-  Coordinates and label. Full precision and street address for the poster and the accepted worker; discovery-style for public and pending-quote workers.
+  Coordinates and label. Exact point and address for the poster and the accepted worker; town and public point for everyone else. Radius filters and distance sort use the public point.
   """
   location: TaskLocation!
   """
-  Latest active quote per worker (EXPIRED and WITHDRAWN omitted).
-  Visible to any authenticated viewer; guests get an empty list.
-  `price` is non-null for the poster and for the worker who sent that quote.
+  The latest quote per worker, newest first (EXPIRED and WITHDRAWN never
+  appear). Every quote returned has its price, times and message; who sent it
+  (`Quote.workerUserId`, `Quote.worker`) is only there for the task owner and
+  for the viewer's own quote.
+  - Task owner, and ops through the admin queries (`adminTask`,
+    `adminTasks`, `adminUpdateTask`): every worker's quote, any status, with
+    the worker.
+  - Everyone else, guests included: while the task is OPEN, the PENDING
+    quotes without the worker, plus the viewer's own quote at any status.
+    Once the task is not OPEN (booked or cancelled), only the viewer's own
+    quote; guests get an empty list.
   """
   quotes: [Quote!]!
 
@@ -2019,17 +2161,157 @@ type Task
   views: Int!
 }
 
+"""
+One line of a task's activity log: what happened, who did it, and when.
+`Task.timeline` decides per viewer which lines they get and who they see.
+"""
 type TaskTimelineEvent {
   type: TaskTimelineEventType!
   timestamp: DateTime! @column(overrideType: "Date")
-  actor: User!
-  data: JSON!
+  """
+  Who did it. Null when the viewer may not know (another worker's quote
+  event, the booked line, an ops edit), and when nobody did
+  (`QUOTE_NOT_SELECTED`, `CANCELLATION_LAPSED`, an automatic
+  `ORDER_COMPLETED`).
+  """
+  actor: User
+  """
+  True when the viewer did it.
+  """
+  byViewer: Boolean!
+  """
+  The worker a quote or booking event is about. Only the task owner (and
+  ops) and that worker get it; null for everyone else and on task events.
+  """
+  worker: User
+  """
+  `TASK_UPDATED`: the fields that changed. Empty for every other type.
+  """
+  changedFields: [TaskEditableField!]!
+  """
+  `TASK_UPDATED`: `{ fields }` with the changed field names, plus
+  `admin: true` for an ops edit. `{}` for every other type.
+  """
+  data: JSON! @deprecated(reason: "Use `changedFields`.")
 }
 
+"""
+What happened. Quote and booking events have the same names as the Messages
+flashes they come with (`FlashKind`), except that both kinds of quote send
+are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `CANCELLATION_WITHDRAWN`
+and `CANCELLATION_LAPSED` are in the log only, with no flash.
+"""
 enum TaskTimelineEventType {
+  """
+  The poster posted the task.
+  """
   TASK_CREATED
+  """
+  The task was edited (`changedFields`).
+  """
   TASK_UPDATED
+  """
+  The poster cancelled the task before anyone was booked.
+  """
   TASK_CANCELLED
+  """
+  A worker sent a quote.
+  """
+  QUOTE_SENT
+  """
+  A worker replaced their pending quote with a new one.
+  """
+  QUOTE_UPDATED
+  """
+  A worker withdrew their pending quote.
+  """
+  QUOTE_WITHDRAWN
+  """
+  The owner declined a quote.
+  """
+  QUOTE_DECLINED
+  """
+  The owner accepted a quote: the task is booked.
+  """
+  QUOTE_ACCEPTED
+  """
+  The owner accepted another quote, so this one was not selected. No actor.
+  """
+  QUOTE_NOT_SELECTED
+  """
+  The actor asked to move the booking to a new time.
+  """
+  RESCHEDULE_REQUESTED
+  """
+  The actor accepted the other party's new time.
+  """
+  RESCHEDULE_CONFIRMED
+  """
+  The actor declined the other party's new time; the booking keeps its time.
+  """
+  RESCHEDULE_DECLINED
+  """
+  The actor withdrew their own request for a new time.
+  """
+  RESCHEDULE_WITHDRAWN
+  """
+  The actor asked to cancel the booking.
+  """
+  CANCELLATION_REQUESTED
+  """
+  The actor refused the other party's request to cancel.
+  """
+  CANCELLATION_DECLINED
+  """
+  The actor withdrew their own request to cancel.
+  """
+  CANCELLATION_WITHDRAWN
+  """
+  A request to cancel lapsed unanswered at the booked start. No actor.
+  """
+  CANCELLATION_LAPSED
+  """
+  The booking was cancelled: the actor accepted the other party's request to
+  cancel, or both parties marked it failed (the actor second).
+  """
+  ORDER_CANCELLED
+  """
+  The actor marked the job done; the other party has 7 days to answer.
+  """
+  ORDER_MARKED_DONE
+  """
+  The actor marked the job failed. The reason is never in the log.
+  """
+  ORDER_MARKED_FAILED
+  """
+  One party marked the job done and the other failed (the actor second).
+  """
+  ORDER_CONFLICT
+  """
+  The job is completed: both parties marked it done (the actor second), or
+  7 days passed after one did (no actor).
+  """
+  ORDER_COMPLETED
+  """
+  The actor left a review. The log never has the stars or the text.
+  """
+  REVIEW_LEFT
+}
+
+"""
+A task field that an edit can change. `STATUS` and `HIDDEN` only change in an
+ops edit.
+"""
+enum TaskEditableField {
+  TITLE
+  DESCRIPTION
+  CATEGORIES
+  BUDGET
+  LOCATION
+  DATETIME
+  CONTACT_METHOD
+  STATUS
+  HIDDEN
 }
 
 input CreateTaskInput {
@@ -2042,15 +2324,19 @@ input CreateTaskInput {
   """
   description: String!
   """
-  Product-defined task category (for example cleaning, moving, repairs).
+  1 to 10 open category tags, any text (for example "Plumbing", "Leaky tap").
+  Each is trimmed with inner spaces collapsed; empty ones are dropped and
+  duplicates removed ignoring case (the first spelling is kept). Errors:
+  `CATEGORY_REQUIRED` (none left), `TOO_MANY_CATEGORIES` (over 10),
+  `CATEGORY_TOO_LONG` (over 64 characters).
   """
-  category: String!
+  categories: [String!]!
   """
   Budget and currency.
   """
   budget: TaskBudgetInput!
   """
-  Map-derived coordinates and place name for search.
+  Map-derived coordinates and address. `name` is reduced to the town on save.
   """
   location: TaskLocationInput!
   """
@@ -2082,9 +2368,9 @@ input UpdateTaskInput {
   """
   description: String
   """
-  Product-defined task category (for example cleaning, moving, repairs).
+  Replaces all categories. Same rules as `CreateTaskInput.categories`.
   """
-  category: String
+  categories: [String!]
   """
   Budget and currency.
   """
@@ -2146,11 +2432,11 @@ input TaskFilter {
   """
   radiusMiles: Float
   """
-  Case-insensitive substring match on title, description, place name, and category.
+  Case-insensitive substring match on title, description, place name, and any category.
   """
   search: String
   """
-  Optional category filter (case-insensitive exact match on the stored category string).
+  Tasks that have this category: case-insensitive exact match on any of `categories`.
   """
   category: String
   """
@@ -2254,6 +2540,12 @@ extend type Query {
   Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
   """
   task(id: ID!): Task
+  """
+  Most-used categories on open, visible tasks, most used first: suggestions
+  for the create-task category input. Grouped ignoring case; each shows its
+  most common spelling. `first` defaults to 12, capped at 50. Anonymous OK.
+  """
+  popularTaskCategories(first: Int = 12): [String!]!
 }
 
 extend type Mutation {
@@ -2267,11 +2559,17 @@ extend type Mutation {
   """
   updateTask(taskId: ID!, input: UpdateTaskInput!): Task! @auth
   """
-  Cancel an open task owned by the current user.
+  Cancel an open task owned by the current user. Errors:
+  `TASK_HAS_ACCEPTED_QUOTE` (someone is booked), `TASK_ALREADY_CANCELLED` (a
+  repeat call; nothing more is logged), `TASK_CHANGED` (it changed while
+  cancelling; read it again).
   """
   cancelTask(taskId: ID!): Task! @auth
   """
   Accept a worker's quote on one of its slots and create the Order (booked at that slot).
+  Works from Messages with a flash's `quoteId` and a `quote.proposedSlots` id.
+  Every other worker's PENDING quote becomes NOT_SELECTED, and each of them gets
+  a `QUOTE_NOT_SELECTED` flash carrying their quote.
   """
   acceptQuote(input: AcceptQuoteInput!): AcceptQuotePayload! @auth
 }
@@ -2325,13 +2623,32 @@ type User
       { path: "googleSub?", type: "string | null" }
       # Sign in with Apple subject. Omitted unless linked; partial unique index.
       { path: "appleSub?", type: "string | null" }
+      # Provider address for the linked login. Not the account email.
+      { path: "googleEmail?", type: "string | null" }
+      { path: "appleEmail?", type: "string | null" }
+      # Encrypted Sign in with Apple refresh token. Never a GraphQL field.
+      { path: "appleRefreshToken?", type: "string | null" }
       { path: "disabled", type: "boolean" }
+      # Sign-in tokens issued before this are refused (BE-102). Set when the
+      # password is changed or reset, so every other session ends. Absent until then.
+      { path: "sessionsValidFrom?", type: "Date | null" }
+      # Account deletion (BE-74): requested, due date (30 days), day-25 reminder
+      # sent, and the day-30 anonymisation. Absent on accounts never deleted.
+      { path: "deletionRequestedAt?", type: "Date | null" }
+      { path: "deletionScheduledFor?", type: "Date | null" }
+      { path: "deletionReminderSentAt?", type: "Date | null" }
+      { path: "deletedAt?", type: "Date | null" }
       # Admin announcement segments only. Not a review-eligibility gate.
       { path: "notificationCohortKeys?", type: "string[]" }
     ]
   )
 {
   id: ID! @id
+  """
+  The real address for the account owner (`me`), admins, and the accepted
+  worker reading `Task.poster`. An empty string for every other viewer,
+  including the task owner reading `Quote.worker`.
+  """
   email: String! @column
   """
   Whether this account's email address has been verified (`emailVerifiedAt` is set).
@@ -2377,6 +2694,11 @@ type User
   """
   unreadMessageCount: Int!
   """
+  Workers this account saved, newest first. Owner-only (`me`); empty for every
+  other viewer. A worker who is no longer public is left out.
+  """
+  savedWorkers: [worker!]!
+  """
   Tasks this user has quoted on (any quote status). Owner-only (`me`); empty for other viewers.
   Prefer over nested `worker.quotedTasks` when `me.worker` may be null.
   """
@@ -2409,11 +2731,58 @@ type User
   """
   disabled: Boolean!
   """
+  Set while the owner's account deletion is pending: the account is disabled
+  and will be anonymised at this time unless `restoreAccount` is called. Every
+  `@auth` action except `Query.me` and `restoreAccount` returns
+  `ACCOUNT_DELETION_SCHEDULED`. Owner and admin only.
+  """
+  deletionScheduledFor: DateTime
+  """
+  Why `requestAccountDeletion` would refuse, before the dialog. Empty when
+  nothing blocks it. Re-auth is still required at the mutation. Owner only
+  (`me`); empty for every other viewer.
+  """
+  deletionBlockers: [AccountDeletionBlocker!]!
+  """
+  True once the account has been deleted (anonymised on day 30). The profile
+  then shows as "Deleted user" with no avatar: don't link to it. False while a
+  deletion is only scheduled.
+  """
+  deleted: Boolean!
+  """
+  Public trust signal for every viewer: orders with status `COMPLETED` where
+  this account is the customer. Same number as
+  `taskAchievements.customer.hostedCompletedCount`. 0 for deleted accounts.
+  """
+  hostedCompletedCount: Int!
+  """
   `PASSWORD` when a password is set, `GOOGLE` / `APPLE` when that account is linked.
+  Owner (`me`) and admin only; empty for every other viewer.
   """
   enabledLoginMethods: [LoginMethod!]!
+  """
+  Address on the linked Google account. This is only the mapping for that
+  login. It is not `email`, and it does not have to match `email`. Null when
+  Google is not linked. Owner (`me`) and admin only.
+  """
+  googleLoginEmail: String
+  """
+  Address on the linked Apple account, including a Hide My Email relay. This
+  is only the mapping for that login. It is not `email`, and it does not have
+  to match `email`. Null when Apple is not linked. Owner (`me`) and admin only.
+  """
+  appleLoginEmail: String
   profile: Profile!
+  """
+  The user's worker profile. Null for other viewers until worker setup is
+  complete, as in the directory and `PublicUser.worker`; the user themself
+  and admins also see a profile still in setup.
+  """
   worker: worker
+  """
+  Owner (`me`) and admin only. Every other viewer gets the default shell
+  (`isProfilePrivate: true`, `marketingEmails: false`, default language).
+  """
   settings: UserSettings!
   """
   True when the user satisfies worker-eligibility requirements. Only meaningful
@@ -2485,6 +2854,12 @@ account is disabled, or `settings.isProfilePrivate` is true.
 """
 type PublicUser {
   id: ID!
+  """
+  True once the account has been deleted (anonymised on day 30). The profile
+  then shows as "Deleted user" with no avatar: don't link to it. False while a
+  deletion is only scheduled.
+  """
+  deleted: Boolean!
   profile: PublicUserProfile!
   """
   When the account was created. Same instant as `createdAt`.
@@ -2590,9 +2965,14 @@ type PublicProfileWorker {
   """
   quotesSentCount: Int!
   """
-  Completed platform jobs, newest first. No prices.
+  Completed platform jobs, newest first. No prices. `first` limits the page
+  (at most 100). Omit it to return every row.
   """
-  completedJobs: [WorkerCompletedJob!]!
+  completedJobs(first: Int): [WorkerCompletedJob!]!
+  """
+  Completed platform jobs, including rows past `first`.
+  """
+  completedJobsCount: Int!
   """
   Save / review / contact state. Null when the viewer is anonymous;
   clients treat that as sign-in required (same as `worker.viewer`).
@@ -2609,7 +2989,7 @@ type PublicProfileWorkHistoryItem {
   taskId: ID!
   role: PublicProfileWorkRole!
   title: String!
-  category: String!
+  categories: [String!]!
   """
   Borough/city area. A leading street segment is dropped.
   """
@@ -2621,10 +3001,10 @@ type PublicProfileWorkHistoryItem {
 Public profile for `/profile/[userId]`.
 
 Anonymous access is allowed. Null when the id is invalid or missing, the
-account is disabled (suspended or banned — stored as `disabled`), or
-`settings.isProfilePrivate` is true. That null is the empty public shell
-and does not say which case it was, including when the viewer is the subject.
-Owners of a hidden profile use `me` for private account data.
+account is disabled (suspended or banned — stored as `disabled`), deleted,
+or `settings.isProfilePrivate` is true and the viewer is not the owner.
+That null does not say which case it was. The owner of a private profile
+gets this preview (`isHidden` is true), including Your activity.
 
 `taskAchievements` and `workHistory` are null unless the authenticated
 viewer is this user. Strangers do not receive agreed totals, streaks,
@@ -2643,10 +3023,19 @@ type PublicProfile {
   """
   isSelf: Boolean!
   """
+  True when this profile is private. Only the owner receives the profile in
+  that case, so a stranger never sees this flag.
+  """
+  isHidden: Boolean!
+  """
   `WORKER` when `worker` is present. Otherwise `CUSTOMER`.
   """
   userType: PublicProfileUserType!
   profile: PublicUserProfile!
+  """
+  Completed bookings this account posted. Same count as `User.hostedCompletedCount`.
+  """
+  hostedCompletedCount: Int!
   """
   When the account was created.
   """
@@ -2692,7 +3081,7 @@ type PublicProfile {
   A self-hired order (same account on both sides) appears once, as `WORKER`.
 
   Null for every viewer who is not this user. Omit `search` to feed a
-  calendar; pass `search` for a case-insensitive match on title, category,
+  calendar; pass `search` for a case-insensitive match on title, any category,
   and area label. Agreed amounts are not on these rows.
   """
   workHistory(search: String): [PublicProfileWorkHistoryItem!]
@@ -2709,9 +3098,23 @@ input LoginInput {
   only when that account's email is verified and the provider verified it too;
   otherwise `OAUTH_LINK_REQUIRES_VERIFIED_EMAIL` (sign in with the password and
   verify the email first). Email already linked to a different Google / Apple
-  account: `OAUTH_ACCOUNT_CONFLICT`.
+  account: `OAUTH_ACCOUNT_CONFLICT`. Linking a provider whose address is not the
+  account email is `linkLoginMethod`, while signed in. That keeps `email`.
   """
   oauthToken: String
+  """
+  `APPLE` only. The raw nonce. The identity token's `nonce` claim must be the
+  SHA-256 hex of this value. A token that carries a nonce, or a raw value that
+  does not match, is `INVALID_OAUTH_TOKEN`. Clients that do not send one yet
+  can omit it; their tokens have no nonce claim.
+  """
+  nonce: String
+  """
+  `APPLE` only. The one-time authorization code from the sign-in. Exchanged
+  for a refresh token so account deletion can revoke it. Optional: sign-in
+  still works without it, and those accounts cannot be revoked at Apple.
+  """
+  authorizationCode: String
   """
   `APPLE` only: the name Apple returns to the client on the first authorization.
   Used only when the account is created. The email always comes from the token.
@@ -2725,6 +3128,35 @@ input LoginInput {
   Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
   """
   captchaToken: String
+}
+
+input LinkLoginMethodInput {
+  """
+  `GOOGLE` or `APPLE`. `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`.
+  """
+  method: LoginMethod!
+  """
+  `GOOGLE`: Google ID token. `APPLE`: Sign in with Apple identity token.
+  Invalid or expired: `INVALID_OAUTH_TOKEN`.
+  """
+  oauthToken: String!
+  """
+  `APPLE` only. The raw nonce. Same rule as `LoginInput.nonce`.
+  """
+  nonce: String
+  """
+  `APPLE` only. The one-time authorization code, so deletion can revoke the
+  refresh token. Optional.
+  """
+  authorizationCode: String
+  """
+  `APPLE` only. Used to fill an empty profile name. The address comes from the token.
+  """
+  firstName: String
+  """
+  `APPLE` only. See `firstName`.
+  """
+  lastName: String
 }
 
 input UpdateMyProfileInput {
@@ -2745,10 +3177,6 @@ input UpdateMyProfileInput {
   Date of birth (private). Must meet the minimum worker age.
   """
   dateOfBirth: DateTime
-  """
-  Public read URL for the uploaded avatar (see `getProfileAvatarUpload`).
-  """
-  avatarUrl: String
 }
 
 input UpdateMySettingsInput {
@@ -2869,6 +3297,19 @@ type MyTasksAchievements {
   customer: CustomerTaskAchievements!
 }
 
+enum AccountDeletionBlockerKind {
+  """
+  An order that is ACTIVE, RESCHEDULING, CANCEL_REQUESTED or CONFLICT.
+  """
+  LIVE_ORDER
+}
+
+type AccountDeletionBlocker {
+  kind: AccountDeletionBlockerKind!
+  orderId: ID!
+  taskId: ID!
+}
+
 extend type Query {
   me: User! @auth
   """
@@ -2879,19 +3320,29 @@ extend type Query {
   Use `me` for the signed-in account.
 
   Null when the user does not exist, the id is invalid, the account is
-  disabled, or the profile is private (`settings.isProfilePrivate`).
+  disabled or waiting for deletion, or the profile is private
+  (`settings.isProfilePrivate`). A deleted account returns a shell named
+  "Deleted user" with no avatar, worker profile or open tasks, and
+  `deleted: true`, so references (reviews, orders) keep working without a
+  profile link; `publicProfile` stays null for it.
   """
   user(id: ID!): PublicUser
   """
   Public profile by user id for `/profile/[userId]`. Anonymous OK.
 
   Null when the user does not exist, the id is invalid, the account is
-  disabled, or the profile is private. See `PublicProfile`.
+  disabled or deleted, or the profile is private and the viewer is not the
+  owner. The owner of a private profile gets the preview, with `isHidden`.
+  See `PublicProfile`.
   """
   publicProfile(userId: ID!): PublicProfile
 }
 
 extend type Mutation {
+  """
+  Create a password account. `@slashie.app` is reserved (`EMAIL_DOMAIN_RESERVED`);
+  staff sign in with Google or Apple.
+  """
   register(
     email: String!
     password: String!
@@ -2922,7 +3373,69 @@ extend type Mutation {
     """
     captchaToken: String
   ): ForgotPasswordPayload!
+  """
+  Set a new password from the emailed reset link. Ends every session that
+  existed before (BE-102) and returns a token for this device.
+  """
   resetPassword(token: String!, newPassword: String!): AuthPayload!
+  """
+  Delete my account. The account is disabled straight away and anonymised 30
+  days later unless restored. Open tasks are cancelled and pending quotes
+  withdrawn (they stay that way after a restore). Emails a confirmation now, a
+  reminder around day 25, and a notice when done.
+
+  Re-auth: password accounts must pass `password` (behind the login rate limit
+  and lockout; wrong: `INVALID_CREDENTIALS`). Google / Apple-only accounts must
+  have signed in within the last 10 minutes (`REAUTH_REQUIRED`).
+  Blocked while any of my orders is ACTIVE, RESCHEDULING, CANCEL_REQUESTED or
+  CONFLICT: `ACCOUNT_HAS_LIVE_ORDERS`.
+  """
+  requestAccountDeletion(password: String): User! @auth
+  """
+  Replace the password while signed in. The current password is the re-auth
+  (login rate limit and lockout). Google / Apple-only accounts use
+  `setPassword`. Ends every other session (BE-102): tokens issued before now
+  stop working and open subscriptions close. Returns a new token for this
+  device; store it in place of the old one. Errors: `PASSWORD_NOT_SET`,
+  `INVALID_CREDENTIALS`, `WEAK_PASSWORD` (under 8 characters),
+  `PASSWORD_UNCHANGED`.
+  """
+  changePassword(currentPassword: String!, newPassword: String!): AuthPayload!
+    @auth
+  """
+  Add a password to a Google / Apple-only account. The sign-in must be from
+  the last 10 minutes (`REAUTH_REQUIRED`). Errors: `PASSWORD_ALREADY_SET`,
+  `WEAK_PASSWORD`.
+  """
+  setPassword(newPassword: String!): User! @auth
+  """
+  Link Google or Apple to the signed-in account from the login method page.
+
+  The account email stays as it is. The provider address, including an Apple
+  Hide My Email relay, is stored only as `googleLoginEmail` or
+  `appleLoginEmail`. A blank account email is filled from the provider. A new
+  Google or Apple sign-in (no account yet) still uses `loginWithMethod`, which
+  copies the provider address into `email`.
+
+  `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`. A bad token is
+  `INVALID_OAUTH_TOKEN`. That Google or Apple account already on someone else,
+  or a different one already on this account, is `OAUTH_ACCOUNT_CONFLICT`.
+  Apple's first link must include the address (`APPLE_EMAIL_REQUIRED`).
+  """
+  linkLoginMethod(input: LinkLoginMethodInput!): User! @auth
+  """
+  Remove Google or Apple from the signed-in account. The account email stays.
+  `PASSWORD` is `LOGIN_METHOD_NOT_SUPPORTED`. Refuses when it would leave no
+  password and no other provider (`LAST_LOGIN_METHOD`): set a password or keep
+  the other provider first. Already unlinked: returns the user unchanged.
+  """
+  unlinkLoginMethod(method: LoginMethod!): User! @auth
+  """
+  Cancel a pending account deletion (after a normal sign-in). Allowed while
+  the account is disabled for deletion. No deletion pending: returns the user
+  unchanged.
+  """
+  restoreAccount: User! @auth
   """
   Complete email verification from the signed link (`/verify-email?token=...`).
   Returns a fresh session token with `emailVerified: true`. Idempotent when already verified.
@@ -2931,6 +3444,7 @@ extend type Mutation {
   becomes the pending address, the old address gets a notice. A link for an
   address that is neither the email nor the pending email (cancelled or
   replaced): `EMAIL_MISMATCH`. Address taken meanwhile: `EMAIL_OR_PHONE_IN_USE`.
+  A pending `@slashie.app` address: `EMAIL_DOMAIN_RESERVED`.
   """
   verifyEmail(token: String!): AuthPayload!
   """
@@ -2944,7 +3458,8 @@ extend type Mutation {
   a verify link to it, and notifies the current address. `email` changes only
   when the link is used (`verifyEmail`). Errors: `EMAIL_CHANGE_NOT_ALLOWED`
   (Google- or Apple-only account), `INVALID_CREDENTIALS` (behind the login rate limit and
-  lockout), `INVALID_EMAIL`, `EMAIL_UNCHANGED`, `EMAIL_OR_PHONE_IN_USE`,
+  lockout), `INVALID_EMAIL`, `EMAIL_UNCHANGED`, `EMAIL_DOMAIN_RESERVED`
+  (`@slashie.app`), `EMAIL_OR_PHONE_IN_USE`,
   `RESEND_VERIFICATION_RATE_LIMITED`.
   """
   requestEmailChange(newEmail: String!, password: String!): Boolean! @auth
@@ -2955,14 +3470,24 @@ extend type Mutation {
   updateMyProfile(input: UpdateMyProfileInput!): User! @auth
   updateMySettings(input: UpdateMySettingsInput!): User! @auth
   """
+  Turn marketing email off from the link in a marketing email. No login. Safe
+  to repeat. The token never expires. The same token also works as a one-click
+  `POST /unsubscribe?token=` (RFC 8058, used by mail apps).
+  Errors: `INVALID_UNSUBSCRIBE_TOKEN`.
+  """
+  unsubscribeMarketingEmails(token: String!): Boolean!
+  """
   Send a 6-digit SMS code (Twilio Verify) to `phone` and hold it as `pendingPhone`.
   The saved number and its verification stay live until `verifyPhone`. Works
   for first-time verification (the saved number) and for changing a verified
   number. Returns true without sending when `phone` is the already verified
-  number. Errors: `EMAIL_OR_PHONE_IN_USE`, `PHONE_VERIFICATION_RATE_LIMITED`
-  (3 sends per hour per user).
+  number. Replacing a verified number requires `password`, or a sign-in in the
+  last 10 minutes when the account has no password (`REAUTH_REQUIRED`), and
+  texts the old number. Errors: `EMAIL_OR_PHONE_IN_USE`,
+  `PHONE_VERIFICATION_RATE_LIMITED` (3 sends per hour per user),
+  `INVALID_CREDENTIALS`, `REAUTH_REQUIRED`.
   """
-  sendPhoneVerification(phone: String!): Boolean! @auth
+  sendPhoneVerification(phone: String!, password: String): Boolean! @auth
   """
   Submit the SMS code sent to `pendingPhone`. On approval the pending number
   becomes `profile.contactNumber` with `phoneVerifiedAt` set. Errors:
@@ -3086,7 +3611,7 @@ Slashie"). Public-safe fields only.
 type WorkerCompletedJob {
   taskId: ID!
   title: String!
-  category: String!
+  categories: [String!]!
   """
   Approximate area only (borough/city) — same redaction as public task views.
   """
@@ -3103,6 +3628,21 @@ type WorkerCompletedJob {
 """
 How the viewer can contact this worker from the profile page.
 """
+enum WorkerPublishState {
+  DRAFT
+  PUBLISHED
+  HIDDEN
+}
+
+enum WorkerProfileGap {
+  PHOTO
+  HEADLINE
+  BIO
+  SKILLS
+  SERVICE_AREA
+  PORTFOLIO
+}
+
 enum WorkerContactAction {
   """
   Contact does not apply (viewing your own profile).
@@ -3133,9 +3673,19 @@ viewers; drives the Save / Leave a review / Contact states on the profile page.
 type WorkerProfileViewer {
   isSaved: Boolean!
   """
-  True when the viewer has a completed (closed) job with this worker.
+  True when the viewer still has a completed job with this worker that they
+  have not reviewed. False once every finished job is reviewed. There is no
+  separate deadline for a first review; the 48-hour window only limits edits.
   """
   canLeaveReview: Boolean!
+  """
+  Newest unreviewed completed job with this worker. Null when `canLeaveReview` is false.
+  """
+  reviewOrderId: ID
+  """
+  Task for `reviewOrderId`.
+  """
+  reviewTaskId: ID
   contactAction: WorkerContactAction!
   relatedTaskId: ID
   relatedQuoteId: ID
@@ -3178,13 +3728,23 @@ type worker
   id: ID! @id
   userId: ID! @link
   """
-  Worker's legal name.
+  Worker's legal name. The worker themself and the admin dossier (which reads
+  this profile as self). Everyone else gets null.
   """
   legalName: String @column
   bio: String @column
   tagline: String @column
+  """
+  Base town (stored town-only). Same value as `preferredLocation.name`.
+  """
   locationAddress: String @column
+  """
+  Exact for the worker; the public point for everyone else.
+  """
   locationLat: Float @column
+  """
+  Exact for the worker; the public point for everyone else.
+  """
   locationLng: Float @column
   yearsExperience: Int @column
   """
@@ -3223,12 +3783,24 @@ type worker
   Multi-step onboarding progress. Owner-only (`me.worker`); null for other viewers.
   """
   setupProgress: WorkerSetupProgress
+  """
+  Draft until setup is finished. Hidden when the account profile is private.
+  Published otherwise. Same order as the Profile page.
+  """
+  publishState: WorkerPublishState!
+  """
+  What the profile could still add, using the same floors as the edit form
+  (headline 10, bio 80, 3 skills; a CJK character counts as two). Portfolio
+  last. Empty when nothing is missing.
+  """
+  profileGaps: [WorkerProfileGap!]!
 
   profile: Profile!
   user: User!
   """
-  Approximate base location shown on maps and the profile. `lat`/`lng`/`name`
-  are public; `address` is only returned to the worker themself.
+  Base location. `name` is the town. The worker gets the exact point and
+  `address`; everyone else gets a fixed public point up to about 250 m away and
+  no `address`. Geo search matches on the public point.
   """
   preferredLocation: Location!
   """
@@ -3270,9 +3842,14 @@ type worker
   """
   serviceAreaLabel: String
   """
-  Completed (customer-confirmed) platform jobs, newest first. Empty when none.
+  Completed platform jobs, newest first. `first` limits the page (at most 100).
+  Omit it to return every row.
   """
-  completedJobs: [WorkerCompletedJob!]!
+  completedJobs(first: Int): [WorkerCompletedJob!]!
+  """
+  Completed platform jobs, including rows past `first`.
+  """
+  completedJobsCount: Int!
   """
   Viewer-specific context (save / review / contact states). Null when anonymous.
   """
@@ -3328,10 +3905,6 @@ input SaveWorkerSetupStepInput {
   Private DOB on the user (`profile.details`).
   """
   dateOfBirth: DateTime
-  """
-  Profile avatar read URL (`profile.photo`; also use `updateMyProfile` if preferred).
-  """
-  avatarUrl: String
   tagline: String
   bio: String
   yearsExperience: Int
@@ -3364,23 +3937,20 @@ input SaveWorkerSetupStepInput {
   portfolioUrls: [String!]
 }
 
-input ProRegistrationInput {
-  """
-  Worker's legal name. Persisted on the worker and as the user's canonical profile name.
-  """
+"""
+The finished-profile editor. Same fields the Account profile form saves.
+"""
+input UpdateWorkerProfileInput {
   legalName: String!
-  bio: String
-  tagline: String
+  tagline: String!
+  bio: String!
+  primaryCategory: WorkerPrimaryCategory!
+  skills: [String!]!
+  yearsExperience: Int!
+  qualifications: [String!]!
   location: LocationInput!
-  """
-  Optional service area (travel radius + label) captured at registration.
-  """
-  serviceArea: ServiceAreaInput
-  yearsExperience: Int
-  """
-  Date of birth (private). Persisted on the user; must meet the minimum worker age.
-  """
-  dateOfBirth: DateTime
+  travelRadiusMiles: Float
+  portfolioUrls: [String!]!
 }
 
 """
@@ -3489,7 +4059,13 @@ extend type Mutation {
   visibility are untouched.
   """
   saveWorkerSetupStep(input: SaveWorkerSetupStepInput!): worker! @auth
-  registerAsPro(input: ProRegistrationInput!): worker!
+  """
+  Edit a finished worker profile in one call. Same checks as replaying
+  `saveWorkerSetupStep` for details, bio, skills, experience, location,
+  travel and portfolio. Setup progress stays complete. A draft is
+  `WORKER_SETUP_INCOMPLETE` — finish setup with `saveWorkerSetupStep`.
+  """
+  updateWorkerProfile(input: UpdateWorkerProfileInput!): worker! @auth
   """
   Save this worker to the viewer's list. Idempotent; cannot save yourself.
   """
