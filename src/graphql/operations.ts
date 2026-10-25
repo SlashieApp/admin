@@ -496,11 +496,6 @@ export const AdminOpsSummary = gql`
         previous
         percentChange
       }
-      quotesDeclined {
-        current
-        previous
-        percentChange
-      }
       ordersOpened {
         current
         previous

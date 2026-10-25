@@ -83,7 +83,6 @@ export function DashboardReport({ range, ops, opsBanner, product }: Props) {
           <div className="metrics">
             <OptionalCount label="Quotes sent" count={ops.quotesSent} />
             <OptionalCount label="Quotes accepted" count={ops.quotesAccepted} />
-            <OptionalCount label="Quotes declined" count={ops.quotesDeclined} />
             <OptionalCount label="Orders opened" count={ops.ordersOpened} />
             <OptionalCount label="Jobs completed" count={ops.jobsCompleted} />
             <OptionalCount

@@ -332,10 +332,11 @@ type AdminOpsSummary {
   """
   quotesAccepted: AdminOpsMetric!
   """
-  Quotes currently `DECLINED` or `REJECTED` whose `createdAt` falls in the
-  window. Withdrawn quotes are not declined.
+  Always 0: quotes can no longer be declined (BE-113). Kept until the admin
+  panel stops reading it.
   """
   quotesDeclined: AdminOpsMetric!
+    @deprecated(reason: "Quotes can no longer be declined (BE-113). Always 0.")
   """
   Orders with `createdAt` in the window (one per accepted quote).
   """
@@ -747,15 +748,14 @@ enum ThreadItemType {
   FLASH
 }
 
+"""
+What a flash is about. When the owner books another worker or that booking
+completes, the other quoting workers get no flash: their quote stays PENDING
+and they read `Task.bookingStatus`.
+"""
 enum FlashKind {
   QUOTE_RECEIVED
   QUOTE_ACCEPTED
-  QUOTE_DECLINED
-  """
-  The owner accepted another worker's quote. Only the non-selected worker sees
-  it; it carries their quote (now NOT_SELECTED).
-  """
-  QUOTE_NOT_SELECTED
   """
   The worker withdrew their quote. Owner and worker see it; it carries the
   quote (now WITHDRAWN).
@@ -961,15 +961,15 @@ type ThreadItem
   quoteId: ID
   """
   The quote a quote flash is about (`QUOTE_RECEIVED`, `QUOTE_ACCEPTED`,
-  `QUOTE_DECLINED`, `QUOTE_NOT_SELECTED`, `QUOTE_WITHDRAWN`, and the
-  worker's `TASK_CANCELLED` / `TASK_REOPENED`): price, message,
-  slots, worker and its current `status`, read live. Only for the task owner
-  and the quoting worker; null otherwise and for other flashes. The owner can
-  act on a PENDING quote straight from the thread with `acceptQuote` (pick a
-  `proposedSlots` id) or `declineQuote`. Every outcome flash carries the same
-  quote, so a normalised client cache updates the original flash's status
-  when the outcome arrives on `threadItemAdded`. After `QUOTE_ACCEPTED`, refetch
-  the thread to see the other quotes become NOT_SELECTED.
+  `QUOTE_WITHDRAWN`, and the worker's `TASK_CANCELLED` / `TASK_REOPENED`):
+  price, message, slots, worker and its current `status`, read live. Only
+  for the task owner and the quoting worker; null otherwise and for other
+  flashes. The owner can accept a PENDING quote straight from the thread with
+  `acceptQuote` (pick a `proposedSlots` id). Every outcome flash carries the
+  same quote, so a normalised client cache updates the original flash's
+  status when the outcome arrives on `threadItemAdded`. Accepting one quote
+  leaves the others PENDING; `Thread.task.bookingStatus` says the task is
+  booked.
   """
   quote: Quote
   orderId: ID
@@ -1514,21 +1514,38 @@ extend type Query {
   pricing: Pricing!
 }
 
+"""
+Where a quote stands. There is no decline: the owner only accepts, one quote
+per task.
+"""
 enum QuoteStatus {
+  """
+  Waiting for the owner. It stays PENDING while another worker is booked and
+  after that booking completes (`Task.bookingStatus`). If that booking ends
+  early and the owner reopens the task, it can be accepted.
+  """
   PENDING
+  """
+  The owner accepted it and booked this worker. One per task. It stays
+  ACCEPTED after the booking ends, unless the owner reopens the task
+  (CLOSED).
+  """
   ACCEPTED
-  DECLINED
+  """
+  The worker withdrew it.
+  """
   WITHDRAWN
-  REJECTED
   """
   Replaced by a newer quote from the same worker on the same task (its own
   `QUOTE_RECEIVED` flash carries the new one). Product reads omit EXPIRED rows.
   """
   EXPIRED
   """
-  The owner accepted another worker's quote on this task.
+  The booking from this quote ended early (cancelled, or ended because the
+  worker's account is suspended) and the owner reopened the task. It can't
+  be accepted again.
   """
-  NOT_SELECTED
+  CLOSED
 }
 
 """
@@ -1582,9 +1599,8 @@ type Quote
   createdAt: DateTime! @column(overrideType: "Date")
   """
   True when the quoting worker's account is suspended (BE-108): the quote is
-  frozen, so it cannot be accepted or declined (`COUNTERPARTY_SUSPENDED`)
-  until ops lift the suspension. Only for viewers who get `worker`; false for
-  everyone else.
+  frozen, so it cannot be accepted (`COUNTERPARTY_SUSPENDED`) until ops lift
+  the suspension. Only for viewers who get `worker`; false for everyone else.
   """
   workerSuspended: Boolean!
 }
@@ -1614,21 +1630,15 @@ extend type Mutation {
   """
   addQuote(input: AddQuoteInput!): Quote! @auth
   """
-  Worker withdraws their own pending quote before it is accepted. That quote
-  becomes WITHDRAWN (any older live versions EXPIRED), and the owner and worker
-  get a `QUOTE_WITHDRAWN` flash. Accepted quotes cannot be withdrawn. The task
-  drops out of the worker pipeline and `Task.quotes`, and stops counting toward
-  the monthly quote limit. A later `addQuote` inserts a new PENDING row.
+  Worker withdraws their own pending quote before it is accepted, also while
+  another worker is booked. That quote becomes WITHDRAWN (any older live
+  versions EXPIRED), and the owner and worker get a `QUOTE_WITHDRAWN` flash.
+  Accepted quotes cannot be withdrawn. The task drops out of the worker
+  pipeline and `Task.quotes`, and stops counting toward the monthly quote
+  limit. A later `addQuote` inserts a new PENDING row.
   Suspended task: `TASK_SUSPENDED`.
   """
   withdrawQuote(quoteId: ID!): Quote! @auth
-  """
-  Task poster declines a worker's pending quote (not the same as `withdrawQuote`).
-  Works from Messages with a flash's `quoteId`. Raises `QUOTE_DECLINED` with the
-  quote. Errors include `TASK_SUSPENDED` and `COUNTERPARTY_SUSPENDED` (the
-  quoting worker's account is suspended).
-  """
-  declineQuote(quoteId: ID!): Quote! @auth
 }
 
 enum ReportTargetType {
@@ -2117,6 +2127,27 @@ enum TaskStatus {
   CANCELLED
 }
 
+"""
+Where a task's booking stands (`Task.bookingStatus`), from its latest
+booking. The same for every viewer.
+"""
+enum TaskBookingStatus {
+  """
+  No live or completed booking: nobody is booked (yet, or again after a
+  reopen), or the booking was cancelled and the owner has not reopened the
+  task.
+  """
+  NONE
+  """
+  The task has a live booking.
+  """
+  BOOKED
+  """
+  The booking completed. It can't be reopened.
+  """
+  COMPLETED
+}
+
 enum TaskPaymentMethod {
   """
   Cash payment on completion or as agreed.
@@ -2207,6 +2238,19 @@ type Task
   """
   suspension: TaskSuspension
   """
+  Where the task's booking stands, for anyone who can open the task, guests
+  included. It never says who is booked. A worker whose quote is still
+  PENDING reads BOOKED as "Booked by someone else" and COMPLETED as "Task
+  completed"; no flash tells them.
+  """
+  bookingStatus: TaskBookingStatus!
+  """
+  True when the viewer is the task owner and `reopenTask` would succeed: a
+  cancelled task, a booking that was cancelled, or a booking whose worker's
+  account is suspended. False for everyone else, ops included.
+  """
+  canReopen: Boolean!
+  """
   When the task row was created. Persisted on `createTask`.
   """
   createdAt: DateTime!
@@ -2274,10 +2318,10 @@ type Task
 Why a task is suspended (BE-108). A suspended task is frozen, not deleted: it
 is in no public list, only its owner and parties (workers with a quote or a
 booking on it) can open it, and nothing on it can be quoted, accepted,
-declined, withdrawn, edited, cancelled, reopened, rescheduled, marked done or
-failed, reviewed or messaged (`TASK_SUSPENDED`). Nothing is rewritten on
-suspend, so lifting it restores the task exactly as it was. Both reasons can
-apply at once; each is lifted on its own.
+withdrawn, edited, cancelled, reopened, rescheduled, marked done or failed,
+reviewed or messaged (`TASK_SUSPENDED`). Nothing is rewritten on suspend, so
+lifting it restores the task exactly as it was. Both reasons can apply at
+once; each is lifted on its own.
 """
 type TaskSuspension {
   """
@@ -2315,8 +2359,7 @@ type TaskTimelineEvent {
   """
   Who did it. Null when the viewer may not know (another worker's quote
   event, the booked line, an ops edit, a suspension line), and when nobody did
-  (`QUOTE_NOT_SELECTED`, `CANCELLATION_LAPSED`, an automatic
-  `ORDER_COMPLETED`).
+  (`CANCELLATION_LAPSED`, an automatic `ORDER_COMPLETED`).
   """
   actor: User
   """
@@ -2364,8 +2407,9 @@ enum TaskTimelineEventType {
   """
   TASK_CANCELLED
   """
-  The poster reopened the task for quotes (`reopenTask`): a cancelled task, or
-  a booking whose worker's account is suspended.
+  The poster reopened the task for quotes (`reopenTask`): a cancelled task, a
+  booking that was cancelled, or a booking whose worker's account is
+  suspended.
   """
   TASK_REOPENED
   """
@@ -2391,17 +2435,10 @@ enum TaskTimelineEventType {
   """
   QUOTE_WITHDRAWN
   """
-  The owner declined a quote.
-  """
-  QUOTE_DECLINED
-  """
-  The owner accepted a quote: the task is booked.
+  The owner accepted a quote: the task is booked. The other quotes stay
+  PENDING and get no line of their own.
   """
   QUOTE_ACCEPTED
-  """
-  The owner accepted another quote, so this one was not selected. No actor.
-  """
-  QUOTE_NOT_SELECTED
   """
   The actor asked to move the booking to a new time.
   """
@@ -2704,11 +2741,13 @@ extend type Query {
   ): [Task!]!
   """
   Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
-  A cancelled or suspended task (`Task.suspension`) is only for its owner and
-  parties (workers with a quote, any status, or a booking on it), so the
-  `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A finished booking is
-  only for its customer and worker. Everyone else, guests included, gets
-  `NOT_FOUND`.
+  A booked or completed task opens for anyone, guests included, read-only
+  with the public fields (`Task.bookingStatus` says which). A cancelled or
+  suspended task (`Task.suspension`) is only for its owner and parties
+  (workers with a quote, any status, or a booking on it), so the
+  `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A booking that was
+  cancelled is only for its customer and worker until the owner reopens the
+  task. Everyone else gets `NOT_FOUND`.
   """
   task(id: ID!): Task
   """
@@ -2741,30 +2780,37 @@ extend type Mutation {
   """
   cancelTask(taskId: ID!): Task! @auth
   """
-  Reopen one of your tasks for quotes (BE-108). Two cases:
-  - A CANCELLED task goes back to OPEN. Quotes that were still PENDING can be
-    accepted again; declined and withdrawn ones stay closed.
+  Reopen one of your tasks for quotes (BE-108, BE-113); `Task.canReopen` says
+  when it would succeed. Three cases:
+  - A CANCELLED task goes back to OPEN.
+  - A booked task (AWARDED) whose booking was cancelled (both agreed, or both
+    marked it failed), with no live or completed booking: the task goes back
+    to OPEN and that booking's quote becomes CLOSED.
   - A booked task (AWARDED, live order) whose booked worker's account is
     suspended (`Order.counterpartySuspension.canReopen`): the order becomes
-    CANCELLED (`ORDER_CANCELLED`), that worker's quote DECLINED
-    (`QUOTE_DECLINED`), the task OPEN, and the quotes that were not selected
-    PENDING again.
-  Logs `TASK_REOPENED`, and each worker whose quote is pending again gets a
-  `TASK_REOPENED` flash carrying it. Errors: `TASK_NOT_FOUND`, `FORBIDDEN`
-  (not the owner), `TASK_SUSPENDED` (a suspended task cannot be reopened),
-  `TASK_ALREADY_OPEN` (OPEN or DRAFT), `WORKER_NOT_SUSPENDED` (booked to a
-  worker whose account is active: cancel through the booking instead),
-  `TASK_NOT_REOPENABLE` (anything else, such as a finished booking),
-  `TASK_CHANGED` (it changed while reopening; read it again).
+    CANCELLED (`ORDER_CANCELLED`), that worker's quote CLOSED, and the task
+    OPEN.
+  Every other quote stayed PENDING, so it can be accepted again; withdrawn
+  and closed ones cannot. Logs `TASK_REOPENED`, and each worker with a
+  pending quote gets a `TASK_REOPENED` flash carrying it. Errors:
+  `TASK_NOT_FOUND`, `FORBIDDEN` (not the owner), `TASK_SUSPENDED` (a
+  suspended task cannot be reopened), `TASK_ALREADY_OPEN` (OPEN or DRAFT),
+  `WORKER_NOT_SUSPENDED` (a live booking whose worker's account is active:
+  cancel the booking first), `TASK_NOT_REOPENABLE` (anything else, such as a
+  completed booking), `TASK_CHANGED` (it changed while reopening; read it
+  again).
   """
   reopenTask(taskId: ID!): Task! @auth
   """
-  Accept a worker's quote on one of its slots and create the Order (booked at that slot).
-  Works from Messages with a flash's `quoteId` and a `quote.proposedSlots` id.
-  Every other worker's PENDING quote becomes NOT_SELECTED, and each of them gets
-  a `QUOTE_NOT_SELECTED` flash carrying their quote. Errors include
-  `TASK_NOT_OPEN` (also while cancelled), `TASK_SUSPENDED`, and
-  `COUNTERPARTY_SUSPENDED` (the quoting worker's account is suspended).
+  Accept a worker's PENDING quote on one of its slots and create the Order
+  (booked at that slot). One quote per task can be accepted; there is no
+  decline. Works from Messages with a flash's `quoteId` and a
+  `quote.proposedSlots` id. Every other quote stays PENDING with no flash or
+  log line of its own: those workers see `Task.bookingStatus` BOOKED, and
+  their quotes can be accepted if the task is reopened. Errors include
+  `QUOTE_NOT_PENDING`, `TASK_NOT_OPEN` (also while cancelled or booked),
+  `TASK_SUSPENDED`, and `COUNTERPARTY_SUSPENDED` (the quoting worker's
+  account is suspended).
   """
   acceptQuote(input: AcceptQuoteInput!): AcceptQuotePayload! @auth
 }
