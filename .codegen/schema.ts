@@ -343,6 +343,20 @@ export type AdminTaskStatusCount = {
 };
 
 /**
+ * Unlimited quotes given by Slashie in admin (BE-117). While it lasts and the
+ * worker has no live Stripe plan, `membership` reads as a paid Unlimited plan
+ * with no auto-renew that ends at `until` (no end when null). Stripe is never
+ * told, and a worker who pays keeps paying.
+ */
+export type AdminUnlimited = {
+  grantedAt: Scalars['DateTime']['output'];
+  /** The admin who gave it: their name, else their email. */
+  grantedBy?: Maybe<Scalars['String']['output']>;
+  /** When it ends; null for no end. */
+  until?: Maybe<Scalars['DateTime']['output']>;
+};
+
+/**
  * God-mode task amendments. Every field is optional; only provided fields change.
  * Ignores poster ownership and OPEN/DRAFT restrictions. Input is still validated.
  */
@@ -732,6 +746,11 @@ export type Mutation = {
    * `TASK_NOT_FOUND` for anyone else.
    */
   addQuote: Quote;
+  /**
+   * Ends an admin-given Unlimited now (BE-117). A no-op when there is none.
+   * Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
+   */
+  adminEndWorkerUnlimited: User;
   /** Ops soft-hide. Keeps the row. Does not add the author review-then-delete flag. */
   adminHideReview: Review;
   /**
@@ -768,6 +787,14 @@ export type Mutation = {
    * Nothing else is rewritten either way.
    */
   adminSetUserDisabled: User;
+  /**
+   * Gives a worker Unlimited quotes until `until`, or with no end when `until`
+   * is null, replacing any earlier one (BE-117). Their plan reads as a paid
+   * Unlimited plan with no auto-renew; at `until` it goes back to Free. Nothing
+   * changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
+   * `INVALID_UNLIMITED_UNTIL` (not in the future).
+   */
+  adminSetWorkerUnlimited: User;
   /** Set product-feedback status. Does not send the draft reply. */
   adminUpdateFeedbackStatus: Feedback;
   /**
@@ -1092,7 +1119,9 @@ export type Mutation = {
   /**
    * Worker withdraws their own pending quote before it is accepted, also while
    * another worker is booked. That quote becomes WITHDRAWN (any older live
-   * versions EXPIRED), and the owner and worker get a `QUOTE_WITHDRAWN` flash.
+   * versions EXPIRED), and the owner and worker get a `QUOTE_WITHDRAWN` flash;
+   * while `Task.bookingStatus` is BOOKED or COMPLETED only the worker does, so
+   * the owner hears nothing (BE-116).
    * Accepted quotes cannot be withdrawn. The task drops out of the worker
    * pipeline and `Task.quotes`, and stops counting toward the monthly quote
    * limit. A later `addQuote` inserts a new PENDING row.
@@ -1117,6 +1146,11 @@ export type MutationAddQuoteArgs = {
 };
 
 
+export type MutationAdminEndWorkerUnlimitedArgs = {
+  userId: Scalars['ID']['input'];
+};
+
+
 export type MutationAdminHideReviewArgs = {
   id: Scalars['ID']['input'];
 };
@@ -1136,6 +1170,12 @@ export type MutationAdminSetTaskSuspendedArgs = {
 export type MutationAdminSetUserDisabledArgs = {
   disabled: Scalars['Boolean']['input'];
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationAdminSetWorkerUnlimitedArgs = {
+  until?: InputMaybe<Scalars['DateTime']['input']>;
+  userId: Scalars['ID']['input'];
 };
 
 
@@ -2164,11 +2204,11 @@ export type Query = {
    * Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
    * A booked or completed task opens for anyone, guests included, read-only
    * with the public fields (`Task.bookingStatus` says which). A cancelled or
-   * suspended task (`Task.suspension`) is only for its owner and parties
-   * (workers with a quote, any status, or a booking on it), so the
-   * `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A booking that was
-   * cancelled is only for its customer and worker until the owner reopens the
-   * task. Everyone else gets `NOT_FOUND`.
+   * suspended task (`Task.suspension`), and a task whose booking was cancelled
+   * until the owner reopens it, is only for its owner and parties (workers
+   * with a quote, any status, or a booking on it), so their threads and the
+   * `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. Everyone else gets
+   * `NOT_FOUND`.
    */
   task?: Maybe<Task>;
   /**
@@ -3777,6 +3817,8 @@ export type WorkerTaskAchievements = {
 };
 
 export type Worker = {
+  /** Unlimited quotes given by Slashie in admin (BE-117), or null. Admin only. */
+  adminUnlimited?: Maybe<AdminUnlimited>;
   bio?: Maybe<Scalars['String']['output']>;
   /**
    * Completed platform jobs, newest first. `first` limits the page (at most 100).
@@ -3963,7 +4005,7 @@ export type AdminUserDetailQueryVariables = Exact<{
 }>;
 
 
-export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null }> } };
+export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, membership: { planName: string, statusLabel: string, statusDescription?: string | null, subscriptionStatus: WorkerSubscriptionStatus, currentPeriodEnd?: any | null, hasUnlimitedQuotes: boolean, quotesUsedThisMonth: number, freeQuotesPerMonth: number }, adminUnlimited?: { until?: any | null, grantedAt: any, grantedBy?: string | null } | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null } }> } };
 
 export type AdminUpdateTaskMutationVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -3988,6 +4030,21 @@ export type AdminUpdateUserMutationVariables = Exact<{
 
 
 export type AdminUpdateUserMutation = { adminUpdateUser: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } };
+
+export type AdminSetWorkerUnlimitedMutationVariables = Exact<{
+  userId: Scalars['ID']['input'];
+  until?: InputMaybe<Scalars['DateTime']['input']>;
+}>;
+
+
+export type AdminSetWorkerUnlimitedMutation = { adminSetWorkerUnlimited: { id: string } };
+
+export type AdminEndWorkerUnlimitedMutationVariables = Exact<{
+  userId: Scalars['ID']['input'];
+}>;
+
+
+export type AdminEndWorkerUnlimitedMutation = { adminEndWorkerUnlimited: { id: string } };
 
 export type AdminSetUserDisabledMutationVariables = Exact<{
   id: Scalars['ID']['input'];
