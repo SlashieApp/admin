@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 
 import { ConfirmAction } from '@/components/ConfirmAction'
 import { PostHogAnalytics } from '@/components/PostHogAnalytics'
+import { WorkerUnlimited } from '@/components/WorkerUnlimited'
 import {
   AdminSetUserDisabled,
   AdminUpdateUser,
@@ -39,11 +40,14 @@ export function UserDetail({ userId }: { userId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState<string | null>(null)
+  // Bumped after a change the page can't patch in place (the worker's plan).
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
+      // A reload keeps the page on screen.
+      if (reloadKey === 0) setLoading(true)
       setError(null)
       try {
         const result = await apolloClient.query<AdminUserDetailQuery>({
@@ -65,7 +69,7 @@ export function UserDetail({ userId }: { userId: string }) {
     return () => {
       cancelled = true
     }
-  }, [userId])
+  }, [userId, reloadKey])
 
   function patch<K extends keyof UserEditFormValues>(
     key: K,
@@ -91,7 +95,8 @@ export function UserDetail({ userId }: { userId: string }) {
       })
       const updated = result.data?.adminUpdateUser
       if (!updated) throw new Error('adminUpdateUser returned no user')
-      setUser((current) => current && { ...current, ...updated })
+      // These mutations don't read the worker's plan; keep the loaded one.
+      setUser((current) => current && { ...current, ...updated, worker: current.worker })
       setValues(userToFormValues(updated))
       setSaveOk('Saved with adminUpdateUser.')
     } catch (err) {
@@ -114,7 +119,8 @@ export function UserDetail({ userId }: { userId: string }) {
       })
       const updated = result.data?.adminSetUserDisabled
       if (!updated) throw new Error('adminSetUserDisabled returned no user')
-      setUser((current) => current && { ...current, ...updated })
+      // These mutations don't read the worker's plan; keep the loaded one.
+      setUser((current) => current && { ...current, ...updated, worker: current.worker })
       setSaveOk(userDisabledResult(nextDisabled))
     } catch (err) {
       setSaveError(graphqlErrorMessage(err))
@@ -257,6 +263,11 @@ export function UserDetail({ userId }: { userId: string }) {
                 {worker.skills?.length ? (
                   <p className="meta">Skills: {worker.skills.join(', ')}</p>
                 ) : null}
+                <WorkerUnlimited
+                  userId={userId}
+                  worker={worker}
+                  onChanged={() => setReloadKey((key) => key + 1)}
+                />
               </>
             ) : (
               <p className="muted">This user is not a worker.</p>

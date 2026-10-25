@@ -512,6 +512,19 @@ extend type Mutation {
   """
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User! @admin
   """
+  Gives a worker Unlimited quotes until `until`, or with no end when `until`
+  is null, replacing any earlier one (BE-117). Their plan reads as a paid
+  Unlimited plan with no auto-renew; at `until` it goes back to Free. Nothing
+  changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
+  `INVALID_UNLIMITED_UNTIL` (not in the future).
+  """
+  adminSetWorkerUnlimited(userId: ID!, until: DateTime): User! @admin
+  """
+  Ends an admin-given Unlimited now (BE-117). A no-op when there is none.
+  Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
+  """
+  adminEndWorkerUnlimited(userId: ID!): User! @admin
+  """
   Set report status for the ops inbox. Same `reports` collection as BE-40
   `updateReportStatus` (env allowlist). Does not require ADMIN_EMAILS.
   """
@@ -1632,7 +1645,9 @@ extend type Mutation {
   """
   Worker withdraws their own pending quote before it is accepted, also while
   another worker is booked. That quote becomes WITHDRAWN (any older live
-  versions EXPIRED), and the owner and worker get a `QUOTE_WITHDRAWN` flash.
+  versions EXPIRED), and the owner and worker get a `QUOTE_WITHDRAWN` flash;
+  while `Task.bookingStatus` is BOOKED or COMPLETED only the worker does, so
+  the owner hears nothing (BE-116).
   Accepted quotes cannot be withdrawn. The task drops out of the worker
   pipeline and `Task.quotes`, and stops counting toward the monthly quote
   limit. A later `addQuote` inserts a new PENDING row.
@@ -2743,11 +2758,11 @@ extend type Query {
   Single task detail entry point. Field visibility depends on viewer role (poster, participant, public).
   A booked or completed task opens for anyone, guests included, read-only
   with the public fields (`Task.bookingStatus` says which). A cancelled or
-  suspended task (`Task.suspension`) is only for its owner and parties
-  (workers with a quote, any status, or a booking on it), so the
-  `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. A booking that was
-  cancelled is only for its customer and worker until the owner reopens the
-  task. Everyone else gets `NOT_FOUND`.
+  suspended task (`Task.suspension`), and a task whose booking was cancelled
+  until the owner reopens it, is only for its owner and parties (workers
+  with a quote, any status, or a booking on it), so their threads and the
+  `TASK_CANCELLED` and `TASK_REOPENED` flashes open it. Everyone else gets
+  `NOT_FOUND`.
   """
   task(id: ID!): Task
   """
@@ -3972,6 +3987,11 @@ type worker
       { path: "serviceAreaLabel", type: "string | null" }
       { path: "portfolioUrls", type: "string[]" }
       { path: "identityVerificationStatus", type: "string | null" }
+      # Unlimited given in admin (BE-117). The Stripe sync never writes it.
+      {
+        path: "adminUnlimited?"
+        type: "{ until: Date | null; grantedAt: Date; grantedByUserId: ObjectId } | null"
+      }
     ]
   )
 {
@@ -4111,6 +4131,10 @@ type worker
   """
   membership: WorkerMembership!
   """
+  Unlimited quotes given by Slashie in admin (BE-117), or null. Admin only.
+  """
+  adminUnlimited: AdminUnlimited @admin
+  """
   Tasks this worker has quoted on (viewer must be the worker).
   """
   quotedTasks(filter: TaskFilter, sort: TaskSort): [Task!]!
@@ -4118,6 +4142,24 @@ type worker
   Reference earnings summary (not payouts). Viewer must be the worker.
   """
   earnings: WorkerEarnings!
+}
+
+"""
+Unlimited quotes given by Slashie in admin (BE-117). While it lasts and the
+worker has no live Stripe plan, `membership` reads as a paid Unlimited plan
+with no auto-renew that ends at `until` (no end when null). Stripe is never
+told, and a worker who pays keeps paying.
+"""
+type AdminUnlimited {
+  """
+  When it ends; null for no end.
+  """
+  until: DateTime
+  grantedAt: DateTime!
+  """
+  The admin who gave it: their name, else their email.
+  """
+  grantedBy: String
 }
 
 type WorkerEarnings {

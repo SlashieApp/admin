@@ -289,6 +289,25 @@ export const AdminUserDetail = gql`
     adminUsers(id: $id, first: 1) {
       items {
         ...UserAdminFields
+        worker {
+          id
+          # The plan as the worker sees it, and Unlimited given in admin (BE-117).
+          membership {
+            planName
+            statusLabel
+            statusDescription
+            subscriptionStatus
+            currentPeriodEnd
+            hasUnlimitedQuotes
+            quotesUsedThisMonth
+            freeQuotesPerMonth
+          }
+          adminUnlimited {
+            until
+            grantedAt
+            grantedBy
+          }
+        }
         tasksPosted {
           id
           title
@@ -324,6 +343,22 @@ export const AdminUpdateUser = gql`
   mutation AdminUpdateUser($id: ID!, $input: AdminUpdateUserInput!) {
     adminUpdateUser(id: $id, input: $input) {
       ...UserAdminFields
+    }
+  }
+`
+
+export const AdminSetWorkerUnlimited = gql`
+  mutation AdminSetWorkerUnlimited($userId: ID!, $until: DateTime) {
+    adminSetWorkerUnlimited(userId: $userId, until: $until) {
+      id
+    }
+  }
+`
+
+export const AdminEndWorkerUnlimited = gql`
+  mutation AdminEndWorkerUnlimited($userId: ID!) {
+    adminEndWorkerUnlimited(userId: $userId) {
+      id
     }
   }
 `
