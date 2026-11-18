@@ -9,6 +9,7 @@ import {
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
+import { membershipStatusLine } from '@/lib/membershipStatus'
 import {
   type AdminUnlimitedView,
   describeUnlimited,
@@ -108,8 +109,7 @@ export function WorkerUnlimited({
         <div>
           <dt>Plan</dt>
           <dd>
-            {membership.planName} · {membership.statusLabel}
-            {membership.statusDescription ? ` · ${membership.statusDescription}` : ''}
+            {membership.planName} · {membershipStatusLine(membership)}
           </dd>
         </div>
         <div>

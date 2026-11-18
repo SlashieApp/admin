@@ -294,10 +294,10 @@ export const AdminUserDetail = gql`
           # The plan as the worker sees it, and Unlimited given in admin (BE-117).
           membership {
             planName
-            statusLabel
-            statusDescription
             subscriptionStatus
+            trialEndsAt
             currentPeriodEnd
+            cancelAtPeriodEnd
             hasUnlimitedQuotes
             quotesUsedThisMonth
             freeQuotesPerMonth

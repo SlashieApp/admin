@@ -512,15 +512,15 @@ extend type Mutation {
   """
   adminSetUserDisabled(id: ID!, disabled: Boolean!): User! @admin
   """
-  Gives a worker Unlimited quotes until `until`, or with no end when `until`
-  is null, replacing any earlier one (BE-117). Their plan reads as a paid
-  Unlimited plan with no auto-renew; at `until` it goes back to Free. Nothing
+  Gives a worker Slashie Pro (unlimited quotes) until `until`, or with no end
+  when `until` is null, replacing any earlier one (BE-117). Their plan reads as
+  a paid Slashie Pro plan with no auto-renew; at `until` it goes back to Free. Nothing
   changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
   `INVALID_UNLIMITED_UNTIL` (not in the future).
   """
   adminSetWorkerUnlimited(userId: ID!, until: DateTime): User! @admin
   """
-  Ends an admin-given Unlimited now (BE-117). A no-op when there is none.
+  Ends an admin-given Slashie Pro now (BE-117). A no-op when there is none.
   Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
   """
   adminEndWorkerUnlimited(userId: ID!): User! @admin
@@ -586,13 +586,19 @@ type WorkerMembership {
   hasUnlimitedQuotes: Boolean!
   subscriptionStatus: WorkerSubscriptionStatus!
   """
-  Short badge label (Free, Trial, Active, Past due, etc.). Prefer this over re-deriving on the client.
+  Short badge label (Free, Trial, Active, Past due, etc.), in English.
   """
   statusLabel: String!
+    @deprecated(
+      reason: "English only; the apps build the label from the flags, status and dates (BE-88). Kept for app builds already installed."
+    )
   """
-  One-line helper for subtitles (e.g. trial end date, payment reminder).
+  One-line helper for subtitles (e.g. trial end date, payment reminder), in English.
   """
   statusDescription: String
+    @deprecated(
+      reason: "English only; the apps write their own line (BE-88). Kept for app builds already installed."
+    )
   trialEndsAt: DateTime
   currentPeriodEnd: DateTime
   """
@@ -609,7 +615,9 @@ type WorkerMembership {
   """
   canManageBilling: Boolean!
   """
-  True when the worker can start Checkout for Slashie Unlimited (no unlimited access, billing configured).
+  True when the worker can start Checkout for Slashie Pro (no unlimited access, billing configured).
+  Also true while Slashie Pro given in admin runs until a date: Checkout's first
+  charge is then on that date (BE-119).
   """
   canUpgrade: Boolean!
 }
@@ -624,7 +632,7 @@ type PortalSessionPayload {
 
 extend type Mutation {
   """
-  Start Stripe Checkout for Slashie Unlimited. Requires an existing Worker profile.
+  Start Stripe Checkout for Slashie Pro. Requires an existing Worker profile.
   """
   createWorkerSubscriptionCheckout(
     successUrl: String!
@@ -799,6 +807,15 @@ enum FlashKind {
   """
   TASK_REOPENED
   """
+  The owner asked a worker to quote (`askWorkerToQuote`). One flash, visible to
+  the owner and that worker only; push goes to the worker. Its `title` and
+  `body` are worded for the viewer ("{customer} asked you to quote on this
+  task." for the worker, "You asked {worker} to quote." for the owner), in
+  their language. Carries no quote. The worker joins the task thread with it,
+  before any quote.
+  """
+  QUOTE_INVITED
+  """
   Ops announcement in the `SYSTEM` thread.
   """
   SYSTEM_ANNOUNCEMENT
@@ -859,6 +876,11 @@ enum ThreadAttentionKind {
   CONFIRM_DONE
   ANSWER_FAILED
   CONFLICT
+  """
+  The viewer (a worker) was asked to quote on this OPEN task and has not
+  quoted or chosen "Not for me". Never for the owner.
+  """
+  QUOTE_INVITATION
 }
 
 type ThreadAttention {
@@ -925,8 +947,9 @@ type Thread
   blockedByMe: Boolean!
   """
   The next step waiting on the viewer. Null when nothing is waiting, including
-  on a system thread, for a worker who was not awarded the task, and while
-  the task or the other party on the booking is suspended.
+  on a system thread, for a worker who was not awarded the task (except
+  `QUOTE_INVITATION` while they were asked to quote on the OPEN task), and
+  while the task or the other party on the booking is suspended.
   """
   attention: ThreadAttention
   createdAt: DateTime! @column(overrideType: "Date")
@@ -1198,15 +1221,19 @@ extend type Subscription {
 }
 
 """
-Order lifecycle (BE-66 / BE-67). Before the booked start either party may request a
-reschedule or a cancellation, which the other party confirms or declines. On or after
+Order lifecycle (BE-66 / BE-67 / BE-125). Until 24 hours before the booked start either
+party may cancel on their own (`cancelOrder`, final). Before the booked start either
+party may request a reschedule or a cancellation, which the other party confirms or
+declines; the other party may also answer a reschedule with new times of their own,
+which replace it. A request nobody answers lapses at the booked start. On or after
 the booked start only Done / Failed apply: both Done → COMPLETED, Done vs Failed →
 CONFLICT, both Failed → CANCELLED. CONFLICT exits only through an accepted cancellation.
 """
 enum OrderStatus {
   ACTIVE
   """
-  A reschedule request is waiting for the other party.
+  A reschedule request is waiting for the other party. It lapses back to ACTIVE
+  (the booking keeps its time) when the booked start passes.
   """
   RESCHEDULING
   """
@@ -1386,6 +1413,14 @@ type Order
   When the order reached COMPLETED or CANCELLED.
   """
   closedAt: DateTime
+  """
+  Until when either party may cancel on their own (`cancelOrder`): 24 hours
+  before the booked start (BE-125). Null when the booking cannot be cancelled
+  that way any more: it is over (COMPLETED, CANCELLED) or in CONFLICT. Inside
+  the last 24 hours only `requestOrderCancellation` (the other party agrees)
+  is left. Apps show the one-sided cancel while `now` is before this time.
+  """
+  oneSidedCancelUntil: DateTime
   createdAt: DateTime! @column(overrideType: "Date")
   task: Task!
   """
@@ -1439,6 +1474,8 @@ extend type Query {
 extend type Mutation {
   """
   Either party, before the booked start, while ACTIVE: propose 1-2 new slots → RESCHEDULING.
+  While the other party's reschedule request is pending, this is a counter-proposal: the
+  new slots replace it, and the other party is asked instead (BE-125).
   """
   requestReschedule(orderId: ID!, proposedSlots: [TimeSlotInput!]!): Order!
     @auth
@@ -1447,7 +1484,8 @@ extend type Mutation {
   """
   confirmReschedule(orderId: ID!, slotId: ID!): Order! @auth
   """
-  The other party rejects the request → ACTIVE with the old booked time.
+  The other party rejects the request → ACTIVE with the old booked time. Apps from
+  BE-125 on no longer offer it (they counter-propose instead); kept for installed apps.
   """
   declineReschedule(orderId: ID!): Order! @auth
   """
@@ -1455,7 +1493,17 @@ extend type Mutation {
   """
   cancelRescheduleRequest(orderId: ID!): Order! @auth
   """
+  Either party ends the booking on their own, until 24 hours before the booked start
+  (`oneSidedCancelUntil`), while ACTIVE, RESCHEDULING or CANCEL_REQUESTED → CANCELLED.
+  Final: it cannot be undone, and a pending request goes with it. The other party is told
+  (`ORDER_CANCELLED`). Refused with `ORDER_CANCEL_WINDOW_CLOSED` inside the last 24 hours,
+  where only `requestOrderCancellation` applies (BE-125).
+  """
+  cancelOrder(orderId: ID!): Order! @auth
+  """
   Either party asks to cancel: before the booked start (→ CANCEL_REQUESTED), or while CONFLICT.
+  The other party has to agree. From BE-125 apps offer it inside the last 24 hours before the
+  booked start only (`cancelOrder` before that); the API still takes it earlier, for installed apps.
   """
   requestOrderCancellation(orderId: ID!): Order! @auth
   """
@@ -1482,11 +1530,18 @@ extend type Mutation {
 }
 
 """
-Public Slashie Unlimited catalog for the /pricing page (Stripe-backed).
+Public Slashie Pro catalog for the /pricing page (Stripe-backed).
 """
 type Pricing {
+  """
+  The paid plan's name, "Slashie Pro". Set by the API, not read from Stripe, so
+  renaming the Stripe product never changes what the apps show (BE-131).
+  """
   productName: String!
   description: String
+    @deprecated(
+      reason: "English only; the apps write their own copy (BE-88). Kept for app builds already installed."
+    )
   """
   Amount in minor currency units (e.g. 1999 = £19.99).
   """
@@ -1506,6 +1561,9 @@ type Pricing {
   Human-readable trial label for marketing copy (e.g. "6 months free").
   """
   trialLabel: String
+    @deprecated(
+      reason: "English only; build the trial line from `trialDays` (BE-88). Kept for app builds already installed."
+    )
   """
   Free-tier monthly allowance: distinct tasks a worker may newly quote, without a subscription.
   """
@@ -1522,7 +1580,7 @@ type Pricing {
 
 extend type Query {
   """
-  Public worker subscription pricing (Slashie Unlimited). No auth required.
+  Public worker subscription pricing (Slashie Pro). No auth required.
   """
   pricing: Pricing!
 }
@@ -1611,6 +1669,16 @@ type Quote
   status: QuoteStatus! @column
   createdAt: DateTime! @column(overrideType: "Date")
   """
+  When the quote stopped being live (BE-127): WITHDRAWN, its withdrawal;
+  CLOSED, the reopen that closed it; PENDING on a task that no longer takes
+  quotes, when the task was booked by someone else or cancelled. Null while
+  the quote is live, ACCEPTED (its order has `closedAt`) or EXPIRED, and when
+  the activity log has no such event (tasks closed before the log). Same
+  audience as `workerUserId`: the quoting worker, the task owner and ops; null
+  for everyone else.
+  """
+  closedAt: DateTime
+  """
   True when the quoting worker's account is suspended (BE-108): the quote is
   frozen, so it cannot be accepted (`COUNTERPARTY_SUSPENDED`) until ops lift
   the suspension. Only for viewers who get `worker`; false for everyone else.
@@ -1635,7 +1703,7 @@ extend type Mutation {
   EXPIRED. Free tier allows 3 distinct tasks per UTC month that still have a
   non-EXPIRED quote created that month. Edits on a live quote do not use
   another slot. After withdraw, that task no longer counts until quoted again.
-  Unlimited and Pro memberships bypass the cap.
+  Slashie Pro (paid or given in admin) bypasses the cap.
   Blocked while this worker has an ACCEPTED quote on the task.
   Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
   A suspended task: `TASK_SUSPENDED` for a worker who already quoted on it,
@@ -1654,6 +1722,140 @@ extend type Mutation {
   Suspended task: `TASK_SUSPENDED`.
   """
   withdrawQuote(quoteId: ID!): Quote! @auth
+}
+
+"""
+A customer asking one worker to quote on one of the customer's own OPEN tasks
+(BE-123). Storage-only (not queryable directly): clients read it through
+`Task.quoteInvitations`, `Task.viewerQuoteInvitation`, the thread's
+`QUOTE_INVITED` flash and `Thread.attention`.
+
+An invitation never creates a quote or a booking and never touches the
+worker's monthly quote allowance. It ends when the task stops being OPEN: no
+state changes, everything that shows it requires the task to be OPEN.
+"""
+type QuoteInvitation @entity {
+  id: ID! @id
+  taskId: ID! @link
+  customerUserId: ID! @link
+  workerUserId: ID! @link
+  createdAt: DateTime! @column
+  """
+  Set when the worker chose "Not for me". The customer is never told.
+  """
+  dismissedAt: DateTime @column
+}
+
+type AskWorkerToQuotePayload {
+  taskId: ID!
+  workerUserId: ID!
+  createdAt: DateTime!
+}
+
+type DismissQuoteInvitationPayload {
+  taskId: ID!
+  """
+  When the invitation was dismissed. On a repeat call, the first time.
+  """
+  dismissedAt: DateTime!
+}
+
+"""
+A worker the owner asked to quote, with the identity the public profile
+exposes (a deleted account reads "Deleted user" with no avatar).
+"""
+type TaskQuoteInvitation {
+  workerUserId: ID!
+  name: String!
+  avatarUrl: String
+  createdAt: DateTime!
+}
+
+"""
+The invited worker's own view of the invitation on a task.
+"""
+type ViewerQuoteInvitation {
+  """
+  The customer's display name.
+  """
+  customerName: String!
+  createdAt: DateTime!
+  """
+  The worker chose "Not for me". The invitation still exists, but nothing
+  waits on them (`Thread.attention` is null).
+  """
+  dismissed: Boolean!
+}
+
+"""
+One of the viewer's own OPEN tasks, as a candidate for asking a worker to quote.
+"""
+type AskableTask {
+  task: Task!
+  """
+  This worker was already asked about this task (also after "Not for me").
+  """
+  alreadyAsked: Boolean!
+  """
+  False when already asked, when the worker has a live quote on the task, or
+  when the task already has 5 invitations.
+  """
+  canAsk: Boolean!
+}
+
+extend type Task {
+  """
+  Owner only; null for everyone else. While the task is OPEN: the workers
+  asked who have no live quote (PENDING or ACCEPTED) on it, newest first,
+  including ones who chose "Not for me" (the customer is not told). Empty when
+  the task is not OPEN.
+  """
+  quoteInvitations: [TaskQuoteInvitation!]
+  """
+  Only for the invited worker; null for everyone else. Null as well when the
+  task is not OPEN or suspended, or when the worker has a live quote on it.
+  """
+  viewerQuoteInvitation: ViewerQuoteInvitation
+}
+
+extend type WorkerProfileViewer {
+  """
+  True when this signed-in viewer could ask this worker to quote at all: the
+  worker has a public profile, accepts invitations, is not the viewer and
+  there is no block either way. It does not depend on the viewer having an
+  open task: with none, clients send them to Post a task first.
+  """
+  canAskToQuote: Boolean!
+  """
+  The viewer's own OPEN, unsuspended tasks, newest first. Empty when
+  `canAskToQuote` is false.
+  """
+  askableTasks: [AskableTask!]!
+}
+
+extend type Mutation {
+  """
+  Ask a worker to quote on one of the viewer's own OPEN tasks. The worker gets
+  a `QUOTE_INVITED` flash in the task's thread plus push; the owner sees the
+  same flash worded for them. Once per task and worker (also after the worker
+  dismissed it), at most 5 per task, at most 10 per customer in any rolling 24
+  hours.
+
+  Errors: `TASK_NOT_FOUND`, `FORBIDDEN` (not the owner), `TASK_NOT_OPEN`,
+  `TASK_SUSPENDED`, `QUOTE_INVITE_ALREADY_SENT`, `QUOTE_INVITE_TASK_LIMIT`,
+  `QUOTE_INVITE_DAILY_LIMIT`, and `QUOTE_INVITE_NOT_AVAILABLE`: the one answer
+  for every reason a worker cannot be asked (block either way, opted out,
+  private or unfinished profile, suspended or disabled, the viewer
+  themself, or already quoted), so it never says which rule applied.
+  """
+  askWorkerToQuote(taskId: ID!, workerUserId: ID!): AskWorkerToQuotePayload!
+    @auth
+  """
+  The invited worker chooses "Not for me". Silent: no flash, no push, the
+  customer is not told. Idempotent. Error: `QUOTE_INVITE_NOT_FOUND` (no
+  invitation for this worker on that task).
+  """
+  dismissQuoteInvitation(taskId: ID!): DismissQuoteInvitationPayload! @auth
 }
 
 enum ReportTargetType {
@@ -1975,8 +2177,9 @@ extend type Mutation {
 
 """
 One image upload (BE-83). PUT the file's bytes to `url`, then pass `uploadKey`
-to `finalizeTaskImage` or `finalizeAvatarUpload`. The upload is private, and
-one that is never finalized is deleted after about an hour.
+to `finalizeTaskImage`, `finalizeAvatarUpload` or `finalizePortfolioImage`.
+The upload is private, and one that is never finalized is deleted after about
+an hour.
 """
 type ImageUpload {
   """
@@ -2011,6 +2214,18 @@ extend type Mutation {
   `UNSUPPORTED_IMAGE`.
   """
   finalizeAvatarUpload(uploadKey: String!): User! @auth
+  """
+  Converts an upload into one of the caller's worker portfolio photos and
+  returns its public URL (BE-120). Stored as a JPEG on our own storage:
+  oriented, long edge at most 2048 px, all metadata (GPS included) removed.
+  The photo is on the profile once that URL is saved in `portfolioUrls`
+  (`saveWorkerSetupStep` `verify.portfolio`, or `updateWorkerProfile`), up to
+  12. A photo dropped from `portfolioUrls` is deleted; an upload that is never
+  saved is deleted after about an hour. Needs a worker profile. Errors:
+  `UPLOAD_NOT_FOUND`, `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `NOT_A_WORKER`,
+  `TOO_MANY_PORTFOLIO_UPLOADS` (36 photos already stored for this worker).
+  """
+  finalizePortfolioImage(uploadKey: String!): String! @auth
 }
 
 enum TaskContactMethod {
@@ -2270,6 +2485,13 @@ type Task
   """
   createdAt: DateTime!
   """
+  When the task stopped taking quotes (BE-127): its latest booking or
+  cancellation. Null while OPEN or DRAFT, and when the activity log has no
+  such event (tasks closed before the log). The owner and ops only; null for
+  everyone else.
+  """
+  closedAt: DateTime
+  """
   The task's activity log, oldest first: one entry per event, resolved for
   the viewer when read. Chat messages are not events.
   - Task owner, and ops through the admin queries: every event, with
@@ -2374,7 +2596,7 @@ type TaskTimelineEvent {
   """
   Who did it. Null when the viewer may not know (another worker's quote
   event, the booked line, an ops edit, a suspension line), and when nobody did
-  (`CANCELLATION_LAPSED`, an automatic `ORDER_COMPLETED`).
+  (`CANCELLATION_LAPSED`, `RESCHEDULE_LAPSED`, an automatic `ORDER_COMPLETED`).
   """
   actor: User
   """
@@ -2405,8 +2627,9 @@ type TaskTimelineEvent {
 """
 What happened. Quote and booking events have the same names as the Messages
 flashes they come with (`FlashKind`), except that both kinds of quote send
-are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `CANCELLATION_WITHDRAWN`
-and `CANCELLATION_LAPSED` are in the log only, with no flash.
+are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `RESCHEDULE_LAPSED`,
+`CANCELLATION_WITHDRAWN` and `CANCELLATION_LAPSED` are in the log only, with no
+flash.
 """
 enum TaskTimelineEventType {
   """
@@ -2455,7 +2678,8 @@ enum TaskTimelineEventType {
   """
   QUOTE_ACCEPTED
   """
-  The actor asked to move the booking to a new time.
+  The actor asked to move the booking to a new time, or answered the other
+  party's request with new times of their own, which replace it (BE-125).
   """
   RESCHEDULE_REQUESTED
   """
@@ -2487,8 +2711,14 @@ enum TaskTimelineEventType {
   """
   CANCELLATION_LAPSED
   """
-  The booking was cancelled: the actor accepted the other party's request to
-  cancel, or both parties marked it failed (the actor second).
+  A request for new times lapsed unanswered at the booked start: the booking
+  keeps its time (BE-125). No actor.
+  """
+  RESCHEDULE_LAPSED
+  """
+  The booking was cancelled: the actor cancelled it on their own (until 24
+  hours before the booked start, BE-125), accepted the other party's request
+  to cancel, or both parties marked it failed (the actor second).
   """
   ORDER_CANCELLED
   """
@@ -2864,6 +3094,8 @@ type User
       { path: "settingsMarketingEmails", type: "boolean" }
       { path: "settingsLanguage", type: "string" }
       { path: "settingsHideTaskPostingNotice?", type: "boolean" }
+      # Missing means on: customers may ask this worker to quote (BE-123).
+      { path: "settingsAcceptsQuoteInvitations?", type: "boolean" }
       { path: "passwordResetTokenHash", type: "string | null" }
       { path: "passwordResetExpiresAt", type: "Date | null" }
       { path: "dateOfBirth", type: "Date | null" }
@@ -2897,6 +3129,13 @@ type User
       { path: "deletedAt?", type: "Date | null" }
       # Admin announcement segments only. Not a review-eligibility gate.
       { path: "notificationCohortKeys?", type: "string[]" }
+      # Sign-up consent (BE-128): when the person agreed to the Terms and
+      # Privacy Policy and confirmed they are 18 or over, and which Terms
+      # (the Terms page's Last updated date). Set once, when the account is
+      # created, only if the client sent it. Absent on older accounts.
+      { path: "termsAcceptedAt?", type: "Date | null" }
+      { path: "termsVersion?", type: "string | null" }
+      { path: "ageConfirmedAt?", type: "Date | null" }
     ]
   )
 {
@@ -2924,6 +3163,22 @@ type User
   """
   phoneVerifiedAt: DateTime
   """
+  When this person agreed to the Terms and Privacy Policy at sign-up (BE-128).
+  Owner (`me`) and admins only; null for everyone else, and for accounts made
+  before BE-128 or by an app that did not send `consent`.
+  """
+  termsAcceptedAt: DateTime
+  """
+  The Terms they agreed to: the Terms page's Last updated date, `YYYY-MM-DD`.
+  Owner and admins only, as `termsAcceptedAt`.
+  """
+  termsVersion: String
+  """
+  When they confirmed they are 18 or over at sign-up (the same line as the
+  Terms). Owner and admins only, as `termsAcceptedAt`.
+  """
+  ageConfirmedAt: DateTime
+  """
   New email waiting for its verify link (`requestEmailChange`). `email` stays
   live until then. Owner only (`me`); null for everyone else.
   """
@@ -2934,8 +3189,10 @@ type User
   """
   pendingPhone: String
   """
-  Tasks the user posted. For anyone but the user and ops, suspended tasks are
-  left out.
+  Every task the user posted, in any status (drafts, cancelled and suspended
+  included). Only the user themself and ops get the list: for anyone else,
+  signed in or not, it is empty. A person's open tasks are on
+  `PublicUser.openTasks`.
   """
   tasksPosted(filter: TaskFilter, sort: TaskSort): [Task!]!
   """
@@ -3040,7 +3297,7 @@ type User
   """
   Owner (`me`) and admin only. Every other viewer gets the default shell
   (`isProfilePrivate: true`, `marketingEmails: false`,
-  `hideTaskPostingNotice: false`, default language).
+  `hideTaskPostingNotice: false`, `acceptsQuoteInvitations: true`, default language).
   """
   settings: UserSettings!
   """
@@ -3081,6 +3338,12 @@ type UserSettings {
   Missing on older accounts, which still see the notice.
   """
   hideTaskPostingNotice: Boolean!
+  """
+  Let customers ask me to quote on their open tasks (`askWorkerToQuote`).
+  On by default, also for accounts that never set it. When off, new
+  invitations are refused; ones already sent stay.
+  """
+  acceptsQuoteInvitations: Boolean!
 }
 
 """
@@ -3206,6 +3469,12 @@ type PublicProfileWorker {
   bio: String
   tagline: String
   primaryCategory: WorkerPrimaryCategory
+  """
+  The title the worker picked (BE-130), shown in place of "Worker" under
+  their name. Same rule as `worker.title`: null unless they have Slashie
+  Pro now; then show "Worker".
+  """
+  title: WorkerPrimaryCategory
   skills: [String!]!
   qualifications: [String!]!
   """
@@ -3214,6 +3483,10 @@ type PublicProfileWorker {
   """
   serviceAreaLabel: String
   yearsExperience: Int
+  """
+  Photos of the worker's work on our own storage. Links to other hosts are
+  never listed here, for any viewer (BE-120).
+  """
   portfolioUrls: [String!]!
   isVerified: Boolean!
   """
@@ -3351,6 +3624,19 @@ type PublicProfile {
   workHistory(search: String): [PublicProfileWorkHistoryItem!]
 }
 
+"""
+What the person agreed to on the sign-up screen (BE-128): the one line "By
+continuing, you confirm you're 18 or over and agree to the Terms and Privacy
+Policy". Sending it records both, with the Terms version shown.
+"""
+input SignUpConsentInput {
+  """
+  The Terms page's Last updated date the screen linked to, `YYYY-MM-DD`
+  (e.g. `2026-07-08`). Not a known version: `TERMS_VERSION_UNKNOWN`.
+  """
+  termsVersion: String!
+}
+
 input LoginInput {
   method: LoginMethod! = PASSWORD
   email: String
@@ -3388,6 +3674,12 @@ input LoginInput {
   `APPLE` only. See `firstName`.
   """
   lastName: String
+  """
+  `GOOGLE` / `APPLE` only. Stored only when this sign-in creates the account;
+  ignored for an existing one. Optional for now (older app builds), so an
+  account made without it has no `termsAcceptedAt`.
+  """
+  consent: SignUpConsentInput
   """
   Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`.
   """
@@ -3448,6 +3740,7 @@ input UpdateMySettingsInput {
   marketingEmails: Boolean
   language: UserLanguage
   hideTaskPostingNotice: Boolean
+  acceptsQuoteInvitations: Boolean
 }
 
 """
@@ -3618,6 +3911,11 @@ extend type Mutation {
     Required when Turnstile is configured and server policy demands a challenge.
     """
     captchaToken: String
+    """
+    What the person agreed to on Sign up (BE-128). Optional for now (older
+    app builds); an account made without it has no `termsAcceptedAt`.
+    """
+    consent: SignUpConsentInput
   ): AuthPayload!
   login(
     email: String!
@@ -3982,12 +4280,15 @@ type worker
       { path: "setupCompletedAt", type: "Date | null" }
       { path: "skills", type: "string[]" }
       { path: "primaryCategory", type: "string | null" }
+      # The title the worker picked (BE-130): a WorkerPrimaryCategory value.
+      # Shown only while they have Slashie Pro; kept when it lapses.
+      { path: "titleCategory?", type: "string | null" }
       { path: "qualifications", type: "string[]" }
       { path: "travelRadiusMiles", type: "number | null" }
       { path: "serviceAreaLabel", type: "string | null" }
       { path: "portfolioUrls", type: "string[]" }
       { path: "identityVerificationStatus", type: "string | null" }
-      # Unlimited given in admin (BE-117). The Stripe sync never writes it.
+      # Slashie Pro given in admin (BE-117). The Stripe sync never writes it.
       {
         path: "adminUnlimited?"
         type: "{ until: Date | null; grantedAt: Date; grantedByUserId: ObjectId } | null"
@@ -4032,6 +4333,20 @@ type worker
   """
   primaryCategory: WorkerPrimaryCategory
   """
+  The title the worker picked (BE-130, a Slashie Pro feature): one of
+  the setup trades, shown in the viewer's language on their profile (in place
+  of "Worker") and on Find workers and quote cards. Null unless they have
+  Slashie Pro now (a choice kept from an earlier membership stays hidden); then
+  clients show "Worker" where a role label shows, and nothing elsewhere.
+  """
+  title: WorkerPrimaryCategory
+  """
+  The title the worker saved, whatever their membership. The worker only;
+  null for everyone else. For the profile editor, which shows it locked
+  after Slashie Pro ends.
+  """
+  titleChoice: WorkerPrimaryCategory
+  """
   Additional free-text skills/tags (setup step `services.skills`). Distinct
   from `primaryCategory`.
   """
@@ -4046,7 +4361,10 @@ type worker
   """
   travelRadiusMiles: Float
   """
-  Optional portfolio image URLs (setup step `verify.portfolio`).
+  Photos of the worker's work (setup step `verify.portfolio`), uploaded with
+  `finalizePortfolioImage` and served from our own storage. A link to another
+  host can no longer be saved (BE-126); one left from before is returned to
+  the worker themself and ops only, never to other people (BE-120).
   """
   portfolioUrls: [String!]!
   """
@@ -4127,11 +4445,14 @@ type worker
   """
   viewer: WorkerProfileViewer
   """
-  Platform subscription plan and quote usage. Stripe-verified when the viewer is the worker.
+  Platform subscription plan and quote usage, checked against Stripe. Only the
+  worker themself (`me.worker`) and ops can read it: `FORBIDDEN` for anyone
+  else, signed in or not.
   """
   membership: WorkerMembership!
   """
-  Unlimited quotes given by Slashie in admin (BE-117), or null. Admin only.
+  Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117), or null.
+  Admin only. The field and type keep their old names so the admin app keeps working.
   """
   adminUnlimited: AdminUnlimited @admin
   """
@@ -4145,10 +4466,12 @@ type worker
 }
 
 """
-Unlimited quotes given by Slashie in admin (BE-117). While it lasts and the
-worker has no live Stripe plan, `membership` reads as a paid Unlimited plan
+Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117). While it
+lasts and the worker has no live Stripe plan, `membership` reads as a paid Slashie Pro plan
 with no auto-renew that ends at `until` (no end when null). Stripe is never
-told, and a worker who pays keeps paying.
+told, and a worker who pays keeps paying. There's no Stripe plan to manage
+(`canManageBilling` false); with an end date the worker can start a paid
+plan whose first charge is on that date (`canUpgrade`, BE-119).
 """
 type AdminUnlimited {
   """
@@ -4226,7 +4549,10 @@ input SaveWorkerSetupStepInput {
   """
   serviceArea: ServiceAreaInput
   """
-  Portfolio URLs (`verify.portfolio`).
+  Portfolio photos (`verify.portfolio`), up to 12: the URLs returned by
+  `finalizePortfolioImage`, and nothing else. A link to another host, or to a
+  photo that is not this worker's own portfolio upload, fails with
+  `INVALID_PORTFOLIO_URL` (BE-126). More than 12: `TOO_MANY_PORTFOLIO_URLS`.
   """
   portfolioUrls: [String!]
 }
@@ -4360,6 +4686,12 @@ extend type Mutation {
   `WORKER_SETUP_INCOMPLETE` — finish setup with `saveWorkerSetupStep`.
   """
   updateWorkerProfile(input: UpdateWorkerProfileInput!): worker! @auth
+  """
+  Pick the title shown with this worker (BE-130), or clear it with null.
+  Picking one needs Slashie Pro: `UNLIMITED_REQUIRED` otherwise.
+  Clearing always works. No worker profile: `NOT_A_WORKER`.
+  """
+  setWorkerTitle(title: WorkerPrimaryCategory): worker! @auth
   """
   Save this worker to the viewer's list. Idempotent; cannot save yourself.
   """

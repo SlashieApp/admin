@@ -343,10 +343,12 @@ export type AdminTaskStatusCount = {
 };
 
 /**
- * Unlimited quotes given by Slashie in admin (BE-117). While it lasts and the
- * worker has no live Stripe plan, `membership` reads as a paid Unlimited plan
+ * Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117). While it
+ * lasts and the worker has no live Stripe plan, `membership` reads as a paid Slashie Pro plan
  * with no auto-renew that ends at `until` (no end when null). Stripe is never
- * told, and a worker who pays keeps paying.
+ * told, and a worker who pays keeps paying. There's no Stripe plan to manage
+ * (`canManageBilling` false); with an end date the worker can start a paid
+ * plan whose first charge is on that date (`canUpgrade`, BE-119).
  */
 export type AdminUnlimited = {
   grantedAt: Scalars['DateTime']['output'];
@@ -390,6 +392,24 @@ export type AdminUpdateUserInput = {
   /** Display name (`User.profile.name`). */
   name?: InputMaybe<Scalars['String']['input']>;
   phoneVerified?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+export type AskWorkerToQuotePayload = {
+  createdAt: Scalars['DateTime']['output'];
+  taskId: Scalars['ID']['output'];
+  workerUserId: Scalars['ID']['output'];
+};
+
+/** One of the viewer's own OPEN tasks, as a candidate for asking a worker to quote. */
+export type AskableTask = {
+  /** This worker was already asked about this task (also after "Not for me"). */
+  alreadyAsked: Scalars['Boolean']['output'];
+  /**
+   * False when already asked, when the worker has a live quote on the task, or
+   * when the task already has 5 invitations.
+   */
+  canAsk: Scalars['Boolean']['output'];
+  task: Task;
 };
 
 export type AuthPayload = {
@@ -499,6 +519,12 @@ export type DevicePushToken = {
   updatedAt: Scalars['DateTime']['output'];
 };
 
+export type DismissQuoteInvitationPayload = {
+  /** When the invitation was dismissed. On a repeat call, the first time. */
+  dismissedAt: Scalars['DateTime']['output'];
+  taskId: Scalars['ID']['output'];
+};
+
 /**
  * Product feedback from a guest or signed-in user (bugs, ratings, feature
  * requests, general comments). Distinct from trust-and-safety `Report`.
@@ -567,6 +593,15 @@ export enum FlashKind {
   OrderMarkedDone = 'ORDER_MARKED_DONE',
   OrderMarkedFailed = 'ORDER_MARKED_FAILED',
   QuoteAccepted = 'QUOTE_ACCEPTED',
+  /**
+   * The owner asked a worker to quote (`askWorkerToQuote`). One flash, visible to
+   * the owner and that worker only; push goes to the worker. Its `title` and
+   * `body` are worded for the viewer ("{customer} asked you to quote on this
+   * task." for the worker, "You asked {worker} to quote." for the owner), in
+   * their language. Carries no quote. The worker joins the task thread with it,
+   * before any quote.
+   */
+  QuoteInvited = 'QUOTE_INVITED',
   QuoteReceived = 'QUOTE_RECEIVED',
   /**
    * The worker withdrew their quote. Owner and worker see it; it carries the
@@ -619,8 +654,9 @@ export enum IdentityVerificationStatus {
 
 /**
  * One image upload (BE-83). PUT the file's bytes to `url`, then pass `uploadKey`
- * to `finalizeTaskImage` or `finalizeAvatarUpload`. The upload is private, and
- * one that is never finalized is deleted after about an hour.
+ * to `finalizeTaskImage`, `finalizeAvatarUpload` or `finalizePortfolioImage`.
+ * The upload is private, and one that is never finalized is deleted after about
+ * an hour.
  */
 export type ImageUpload = {
   /** Pass this to the finalize mutation. */
@@ -681,6 +717,12 @@ export type LoginInput = {
   authorizationCode?: InputMaybe<Scalars['String']['input']>;
   /** Cloudflare Turnstile token. Prefer this arg; API also accepts `x-captcha-token`. */
   captchaToken?: InputMaybe<Scalars['String']['input']>;
+  /**
+   * `GOOGLE` / `APPLE` only. Stored only when this sign-in creates the account;
+   * ignored for an existing one. Optional for now (older app builds), so an
+   * account made without it has no `termsAcceptedAt`.
+   */
+  consent?: InputMaybe<SignUpConsentInput>;
   email?: InputMaybe<Scalars['String']['input']>;
   /**
    * `APPLE` only: the name Apple returns to the client on the first authorization.
@@ -739,7 +781,7 @@ export type Mutation = {
    * EXPIRED. Free tier allows 3 distinct tasks per UTC month that still have a
    * non-EXPIRED quote created that month. Edits on a live quote do not use
    * another slot. After withdraw, that task no longer counts until quoted again.
-   * Unlimited and Pro memberships bypass the cap.
+   * Slashie Pro (paid or given in admin) bypasses the cap.
    * Blocked while this worker has an ACCEPTED quote on the task.
    * Every quote, new or updated, raises its own `QUOTE_RECEIVED` flash carrying it.
    * A suspended task: `TASK_SUSPENDED` for a worker who already quoted on it,
@@ -747,7 +789,7 @@ export type Mutation = {
    */
   addQuote: Quote;
   /**
-   * Ends an admin-given Unlimited now (BE-117). A no-op when there is none.
+   * Ends an admin-given Slashie Pro now (BE-117). A no-op when there is none.
    * Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
    */
   adminEndWorkerUnlimited: User;
@@ -788,9 +830,9 @@ export type Mutation = {
    */
   adminSetUserDisabled: User;
   /**
-   * Gives a worker Unlimited quotes until `until`, or with no end when `until`
-   * is null, replacing any earlier one (BE-117). Their plan reads as a paid
-   * Unlimited plan with no auto-renew; at `until` it goes back to Free. Nothing
+   * Gives a worker Slashie Pro (unlimited quotes) until `until`, or with no end
+   * when `until` is null, replacing any earlier one (BE-117). Their plan reads as
+   * a paid Slashie Pro plan with no auto-renew; at `until` it goes back to Free. Nothing
    * changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
    * `INVALID_UNLIMITED_UNTIL` (not in the future).
    */
@@ -807,12 +849,35 @@ export type Mutation = {
   /** God-mode user update for ops. Safe fields only (name, contact, verification). */
   adminUpdateUser: User;
   /**
+   * Ask a worker to quote on one of the viewer's own OPEN tasks. The worker gets
+   * a `QUOTE_INVITED` flash in the task's thread plus push; the owner sees the
+   * same flash worded for them. Once per task and worker (also after the worker
+   * dismissed it), at most 5 per task, at most 10 per customer in any rolling 24
+   * hours.
+   *
+   * Errors: `TASK_NOT_FOUND`, `FORBIDDEN` (not the owner), `TASK_NOT_OPEN`,
+   * `TASK_SUSPENDED`, `QUOTE_INVITE_ALREADY_SENT`, `QUOTE_INVITE_TASK_LIMIT`,
+   * `QUOTE_INVITE_DAILY_LIMIT`, and `QUOTE_INVITE_NOT_AVAILABLE`: the one answer
+   * for every reason a worker cannot be asked (block either way, opted out,
+   * private or unfinished profile, suspended or disabled, the viewer
+   * themself, or already quoted), so it never says which rule applied.
+   */
+  askWorkerToQuote: AskWorkerToQuotePayload;
+  /**
    * Block a user: neither side can send messages to the other until unblocked.
    * Errors: `CANNOT_BLOCK_SELF`.
    */
   blockUser: Scalars['Boolean']['output'];
   /** Drop a pending email change. Earlier links for it stop working. */
   cancelEmailChange: Scalars['Boolean']['output'];
+  /**
+   * Either party ends the booking on their own, until 24 hours before the booked start
+   * (`oneSidedCancelUntil`), while ACTIVE, RESCHEDULING or CANCEL_REQUESTED → CANCELLED.
+   * Final: it cannot be undone, and a pending request goes with it. The other party is told
+   * (`ORDER_CANCELLED`). Refused with `ORDER_CANCEL_WINDOW_CLOSED` inside the last 24 hours,
+   * where only `requestOrderCancellation` applies (BE-125).
+   */
+  cancelOrder: Order;
   /** Drop a pending phone change. The saved number is untouched. */
   cancelPhoneChange: Scalars['Boolean']['output'];
   /** The requester withdraws their reschedule request → ACTIVE. */
@@ -866,12 +931,21 @@ export type Mutation = {
   createTask: Task;
   /** Open Stripe Customer Portal for the worker's subscription. Requires stripeCustomerId. */
   createWorkerBillingPortal: PortalSessionPayload;
-  /** Start Stripe Checkout for Slashie Unlimited. Requires an existing Worker profile. */
+  /** Start Stripe Checkout for Slashie Pro. Requires an existing Worker profile. */
   createWorkerSubscriptionCheckout: CheckoutSessionPayload;
   /** The other party refuses → back to ACTIVE (or stays CONFLICT). */
   declineOrderCancellation: Order;
-  /** The other party rejects the request → ACTIVE with the old booked time. */
+  /**
+   * The other party rejects the request → ACTIVE with the old booked time. Apps from
+   * BE-125 on no longer offer it (they counter-propose instead); kept for installed apps.
+   */
   declineReschedule: Order;
+  /**
+   * The invited worker chooses "Not for me". Silent: no flash, no push, the
+   * customer is not told. Idempotent. Error: `QUOTE_INVITE_NOT_FOUND` (no
+   * invitation for this worker on that task).
+   */
+  dismissQuoteInvitation: DismissQuoteInvitationPayload;
   /**
    * Converts an upload into the caller's avatar (JPEG, long edge at most
    * 1024 px, metadata removed), sets `avatarUrl` and deletes the previous
@@ -879,6 +953,18 @@ export type Mutation = {
    * `UNSUPPORTED_IMAGE`.
    */
   finalizeAvatarUpload: User;
+  /**
+   * Converts an upload into one of the caller's worker portfolio photos and
+   * returns its public URL (BE-120). Stored as a JPEG on our own storage:
+   * oriented, long edge at most 2048 px, all metadata (GPS included) removed.
+   * The photo is on the profile once that URL is saved in `portfolioUrls`
+   * (`saveWorkerSetupStep` `verify.portfolio`, or `updateWorkerProfile`), up to
+   * 12. A photo dropped from `portfolioUrls` is deleted; an upload that is never
+   * saved is deleted after about an hour. Needs a worker profile. Errors:
+   * `UPLOAD_NOT_FOUND`, `IMAGE_TOO_LARGE`, `UNSUPPORTED_IMAGE`, `NOT_A_WORKER`,
+   * `TOO_MANY_PORTFOLIO_UPLOADS` (36 photos already stored for this worker).
+   */
+  finalizePortfolioImage: Scalars['String']['output'];
   /**
    * Converts an upload into task photo `index` (0 to 9) and returns its public
    * URL. Stored as a JPEG: oriented, long edge at most 2048 px, all metadata
@@ -983,9 +1069,17 @@ export type Mutation = {
    * `RESEND_VERIFICATION_RATE_LIMITED`.
    */
   requestEmailChange: Scalars['Boolean']['output'];
-  /** Either party asks to cancel: before the booked start (→ CANCEL_REQUESTED), or while CONFLICT. */
+  /**
+   * Either party asks to cancel: before the booked start (→ CANCEL_REQUESTED), or while CONFLICT.
+   * The other party has to agree. From BE-125 apps offer it inside the last 24 hours before the
+   * booked start only (`cancelOrder` before that); the API still takes it earlier, for installed apps.
+   */
   requestOrderCancellation: Order;
-  /** Either party, before the booked start, while ACTIVE: propose 1-2 new slots → RESCHEDULING. */
+  /**
+   * Either party, before the booked start, while ACTIVE: propose 1-2 new slots → RESCHEDULING.
+   * While the other party's reschedule request is pending, this is a counter-proposal: the
+   * new slots replace it, and the other party is asked instead (BE-125).
+   */
   requestReschedule: Order;
   /**
    * Resend the verification email. Goes to `pendingEmail` when an email change is
@@ -1042,6 +1136,12 @@ export type Mutation = {
    * `WEAK_PASSWORD`.
    */
   setPassword: User;
+  /**
+   * Pick the title shown with this worker (BE-130), or clear it with null.
+   * Picking one needs Slashie Pro: `UNLIMITED_REQUIRED` otherwise.
+   * Clearing always works. No worker profile: `NOT_A_WORKER`.
+   */
+  setWorkerTitle: Worker;
   /** Force Stripe subscription reconcile and return fresh membership (e.g. after Checkout return). */
   syncWorkerBilling: WorkerMembership;
   unblockUser: Scalars['Boolean']['output'];
@@ -1203,8 +1303,19 @@ export type MutationAdminUpdateUserArgs = {
 };
 
 
+export type MutationAskWorkerToQuoteArgs = {
+  taskId: Scalars['ID']['input'];
+  workerUserId: Scalars['ID']['input'];
+};
+
+
 export type MutationBlockUserArgs = {
   userId: Scalars['ID']['input'];
+};
+
+
+export type MutationCancelOrderArgs = {
+  orderId: Scalars['ID']['input'];
 };
 
 
@@ -1271,7 +1382,17 @@ export type MutationDeclineRescheduleArgs = {
 };
 
 
+export type MutationDismissQuoteInvitationArgs = {
+  taskId: Scalars['ID']['input'];
+};
+
+
 export type MutationFinalizeAvatarUploadArgs = {
+  uploadKey: Scalars['String']['input'];
+};
+
+
+export type MutationFinalizePortfolioImageArgs = {
   uploadKey: Scalars['String']['input'];
 };
 
@@ -1330,6 +1451,7 @@ export type MutationMarkThreadReadArgs = {
 
 export type MutationRegisterArgs = {
   captchaToken?: InputMaybe<Scalars['String']['input']>;
+  consent?: InputMaybe<SignUpConsentInput>;
   contactNumber?: InputMaybe<Scalars['String']['input']>;
   email: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
@@ -1405,6 +1527,11 @@ export type MutationSendPhoneVerificationArgs = {
 
 export type MutationSetPasswordArgs = {
   newPassword: Scalars['String']['input'];
+};
+
+
+export type MutationSetWorkerTitleArgs = {
+  title?: InputMaybe<WorkerPrimaryCategory>;
 };
 
 
@@ -1545,6 +1672,14 @@ export type Order = {
   customerUserId: Scalars['ID']['output'];
   id: Scalars['ID']['output'];
   myCloseAction?: Maybe<OrderCloseAction>;
+  /**
+   * Until when either party may cancel on their own (`cancelOrder`): 24 hours
+   * before the booked start (BE-125). Null when the booking cannot be cancelled
+   * that way any more: it is over (COMPLETED, CANCELLED) or in CONFLICT. Inside
+   * the last 24 hours only `requestOrderCancellation` (the other party agrees)
+   * is left. Apps show the one-sided cancel while `now` is before this time.
+   */
+  oneSidedCancelUntil?: Maybe<Scalars['DateTime']['output']>;
   pendingRequest?: Maybe<OrderPendingRequest>;
   quoteId: Scalars['ID']['output'];
   rescheduleHistory: Array<OrderReschedule>;
@@ -1684,8 +1819,11 @@ export type OrderSnapshot = {
 };
 
 /**
- * Order lifecycle (BE-66 / BE-67). Before the booked start either party may request a
- * reschedule or a cancellation, which the other party confirms or declines. On or after
+ * Order lifecycle (BE-66 / BE-67 / BE-125). Until 24 hours before the booked start either
+ * party may cancel on their own (`cancelOrder`, final). Before the booked start either
+ * party may request a reschedule or a cancellation, which the other party confirms or
+ * declines; the other party may also answer a reschedule with new times of their own,
+ * which replace it. A request nobody answers lapses at the booked start. On or after
  * the booked start only Done / Failed apply: both Done → COMPLETED, Done vs Failed →
  * CONFLICT, both Failed → CANCELLED. CONFLICT exits only through an accepted cancellation.
  */
@@ -1700,7 +1838,10 @@ export enum OrderStatus {
   Completed = 'COMPLETED',
   /** One party marked Done and the other Failed. */
   Conflict = 'CONFLICT',
-  /** A reschedule request is waiting for the other party. */
+  /**
+   * A reschedule request is waiting for the other party. It lapses back to ACTIVE
+   * (the booking keeps its time) when the booked start passes.
+   */
   Rescheduling = 'RESCHEDULING'
 }
 
@@ -1732,8 +1873,9 @@ export type PriceInput = {
   currency: Currency;
 };
 
-/** Public Slashie Unlimited catalog for the /pricing page (Stripe-backed). */
+/** Public Slashie Pro catalog for the /pricing page (Stripe-backed). */
 export type Pricing = {
+  /** @deprecated English only; the apps write their own copy (BE-88). Kept for app builds already installed. */
   description?: Maybe<Scalars['String']['output']>;
   /** Free-tier monthly allowance: distinct tasks a worker may newly quote, without a subscription. */
   freeQuotesPerMonth: Scalars['Int']['output'];
@@ -1743,6 +1885,10 @@ export type Pricing = {
   priceInterval: Scalars['String']['output'];
   /** Charges every this many intervals. 3 with `priceInterval` month is every 3 months. */
   priceIntervalCount: Scalars['Int']['output'];
+  /**
+   * The paid plan's name, "Slashie Pro". Set by the API, not read from Stripe, so
+   * renaming the Stripe product never changes what the apps show (BE-131).
+   */
   productName: Scalars['String']['output'];
   /** Stripe Price id for future Checkout integration. */
   stripePriceId: Scalars['String']['output'];
@@ -1753,7 +1899,10 @@ export type Pricing = {
    * The Price's own trial when it has one, otherwise 180. Same source as Checkout.
    */
   trialDays?: Maybe<Scalars['Int']['output']>;
-  /** Human-readable trial label for marketing copy (e.g. "6 months free"). */
+  /**
+   * Human-readable trial label for marketing copy (e.g. "6 months free").
+   * @deprecated English only; build the trial line from `trialDays` (BE-88). Kept for app builds already installed.
+   */
   trialLabel?: Maybe<Scalars['String']['output']>;
 };
 
@@ -1972,6 +2121,10 @@ export type PublicProfileWorker = {
   isVerified: Scalars['Boolean']['output'];
   /** Trust flag only. The phone number is not on this type. */
   phoneVerified: Scalars['Boolean']['output'];
+  /**
+   * Photos of the worker's work on our own storage. Links to other hosts are
+   * never listed here, for any viewer (BE-120).
+   */
   portfolioUrls: Array<Scalars['String']['output']>;
   primaryCategory?: Maybe<WorkerPrimaryCategory>;
   qualifications: Array<Scalars['String']['output']>;
@@ -1984,6 +2137,12 @@ export type PublicProfileWorker = {
   serviceAreaLabel?: Maybe<Scalars['String']['output']>;
   skills: Array<Scalars['String']['output']>;
   tagline?: Maybe<Scalars['String']['output']>;
+  /**
+   * The title the worker picked (BE-130), shown in place of "Worker" under
+   * their name. Same rule as `worker.title`: null unless they have Slashie
+   * Pro now; then show "Worker".
+   */
+  title?: Maybe<WorkerPrimaryCategory>;
   /**
    * Save / review / contact state. Null when the viewer is anonymous;
    * clients treat that as sign-in required (same as `worker.viewer`).
@@ -2183,7 +2342,7 @@ export type Query = {
    * most common spelling. `first` defaults to 12, capped at 50. Anonymous OK.
    */
   popularTaskCategories: Array<Scalars['String']['output']>;
-  /** Public worker subscription pricing (Slashie Unlimited). No auth required. */
+  /** Public worker subscription pricing (Slashie Pro). No auth required. */
   pricing: Pricing;
   /**
    * Public profile by user id for `/profile/[userId]`. Anonymous OK.
@@ -2418,6 +2577,16 @@ export type QueryWorkersArgs = {
  * ops.
  */
 export type Quote = {
+  /**
+   * When the quote stopped being live (BE-127): WITHDRAWN, its withdrawal;
+   * CLOSED, the reopen that closed it; PENDING on a task that no longer takes
+   * quotes, when the task was booked by someone else or cancelled. Null while
+   * the quote is live, ACCEPTED (its order has `closedAt`) or EXPIRED, and when
+   * the activity log has no such event (tasks closed before the log). Same
+   * audience as `workerUserId`: the quoting worker, the task owner and ops; null
+   * for everyone else.
+   */
+  closedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
   id: Scalars['ID']['output'];
   /** Pitch from the quoting worker, for anyone who can see the quote. */
@@ -2450,6 +2619,26 @@ export type Quote = {
    * (through the admin queries) get it. Null for everyone else, guests included.
    */
   workerUserId?: Maybe<Scalars['ID']['output']>;
+};
+
+/**
+ * A customer asking one worker to quote on one of the customer's own OPEN tasks
+ * (BE-123). Storage-only (not queryable directly): clients read it through
+ * `Task.quoteInvitations`, `Task.viewerQuoteInvitation`, the thread's
+ * `QUOTE_INVITED` flash and `Thread.attention`.
+ *
+ * An invitation never creates a quote or a booking and never touches the
+ * worker's monthly quote allowance. It ends when the task stops being OPEN: no
+ * state changes, everything that shows it requires the task to be OPEN.
+ */
+export type QuoteInvitation = {
+  createdAt: Scalars['DateTime']['output'];
+  customerUserId: Scalars['ID']['output'];
+  /** Set when the worker chose "Not for me". The customer is never told. */
+  dismissedAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['ID']['output'];
+  taskId: Scalars['ID']['output'];
+  workerUserId: Scalars['ID']['output'];
 };
 
 /**
@@ -2615,7 +2804,12 @@ export type SaveWorkerSetupStepInput = {
   /** Full legal/display name. Alternative to `firstName` + `lastName` (`profile.details`). */
   legalName?: InputMaybe<Scalars['String']['input']>;
   location?: InputMaybe<LocationInput>;
-  /** Portfolio URLs (`verify.portfolio`). */
+  /**
+   * Portfolio photos (`verify.portfolio`), up to 12: the URLs returned by
+   * `finalizePortfolioImage`, and nothing else. A link to another host, or to a
+   * photo that is not this worker's own portfolio upload, fails with
+   * `INVALID_PORTFOLIO_URL` (BE-126). More than 12: `TOO_MANY_PORTFOLIO_URLS`.
+   */
   portfolioUrls?: InputMaybe<Array<Scalars['String']['input']>>;
   /** Primary trade (`services.skills`). Required when saving that step. */
   primaryCategory?: InputMaybe<WorkerPrimaryCategory>;
@@ -2668,6 +2862,19 @@ export type ServiceAreaInput = {
   radiusMiles?: InputMaybe<Scalars['Float']['input']>;
 };
 
+/**
+ * What the person agreed to on the sign-up screen (BE-128): the one line "By
+ * continuing, you confirm you're 18 or over and agree to the Terms and Privacy
+ * Policy". Sending it records both, with the Terms version shown.
+ */
+export type SignUpConsentInput = {
+  /**
+   * The Terms page's Last updated date the screen linked to, `YYYY-MM-DD`
+   * (e.g. `2026-07-08`). Not a known version: `TERMS_VERSION_UNKNOWN`.
+   */
+  termsVersion: Scalars['String']['input'];
+};
+
 export enum SortDirection {
   Asc = 'ASC',
   Desc = 'DESC'
@@ -2704,6 +2911,13 @@ export type Task = {
    * `TaskFilter.category` match any of them, ignoring case.
    */
   categories: Array<Scalars['String']['output']>;
+  /**
+   * When the task stopped taking quotes (BE-127): its latest booking or
+   * cancellation. Null while OPEN or DRAFT, and when the activity log has no
+   * such event (tasks closed before the log). The owner and ops only; null for
+   * everyone else.
+   */
+  closedAt?: Maybe<Scalars['DateTime']['output']>;
   /** When the task row was created. Persisted on `createTask`. */
   createdAt: Scalars['DateTime']['output'];
   /** Task date/time preference. */
@@ -2737,6 +2951,13 @@ export type Task = {
    * profile peek whose schema cannot request private fields, use `user(id:)`.
    */
   poster?: Maybe<User>;
+  /**
+   * Owner only; null for everyone else. While the task is OPEN: the workers
+   * asked who have no live quote (PENDING or ACCEPTED) on it, newest first,
+   * including ones who chose "Not for me" (the customer is not told). Empty when
+   * the task is not OPEN.
+   */
+  quoteInvitations?: Maybe<Array<TaskQuoteInvitation>>;
   /**
    * The latest quote per worker, newest first (EXPIRED and WITHDRAWN never
    * appear). Every quote returned has its price, times and message; who sent it
@@ -2781,6 +3002,11 @@ export type Task = {
   timeline: Array<TaskTimelineEvent>;
   /** Short title shown in lists and search. */
   title: Scalars['String']['output'];
+  /**
+   * Only for the invited worker; null for everyone else. Null as well when the
+   * task is not OPEN or suspended, or when the worker has a live quote on it.
+   */
+  viewerQuoteInvitation?: Maybe<ViewerQuoteInvitation>;
   /** Non-owner task detail views (PostHog, last 90 days). Public; 0 when PostHog is unavailable. */
   views: Scalars['Int']['output'];
 };
@@ -2987,6 +3213,17 @@ export enum TaskPaymentMethod {
 }
 
 /**
+ * A worker the owner asked to quote, with the identity the public profile
+ * exposes (a deleted account reads "Deleted user" with no avatar).
+ */
+export type TaskQuoteInvitation = {
+  avatarUrl?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  name: Scalars['String']['output'];
+  workerUserId: Scalars['ID']['output'];
+};
+
+/**
  * Sort order for list queries. Supplied as a sibling argument to `filter` (never nested inside it).
  * When omitted, all list queries default to `CREATED_AT` `DESC` (except `tasks` with a geo center, which
  * defaults to nearest-first distance ordering).
@@ -3056,7 +3293,7 @@ export type TaskTimelineEvent = {
   /**
    * Who did it. Null when the viewer may not know (another worker's quote
    * event, the booked line, an ops edit, a suspension line), and when nobody did
-   * (`CANCELLATION_LAPSED`, an automatic `ORDER_COMPLETED`).
+   * (`CANCELLATION_LAPSED`, `RESCHEDULE_LAPSED`, an automatic `ORDER_COMPLETED`).
    */
   actor?: Maybe<User>;
   /** True when the viewer did it. */
@@ -3086,8 +3323,9 @@ export type TaskTimelineEvent = {
 /**
  * What happened. Quote and booking events have the same names as the Messages
  * flashes they come with (`FlashKind`), except that both kinds of quote send
- * are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `CANCELLATION_WITHDRAWN`
- * and `CANCELLATION_LAPSED` are in the log only, with no flash.
+ * are `QUOTE_RECEIVED` there. `RESCHEDULE_WITHDRAWN`, `RESCHEDULE_LAPSED`,
+ * `CANCELLATION_WITHDRAWN` and `CANCELLATION_LAPSED` are in the log only, with no
+ * flash.
  */
 export enum TaskTimelineEventType {
   /** The actor refused the other party's request to cancel. */
@@ -3099,8 +3337,9 @@ export enum TaskTimelineEventType {
   /** The actor withdrew their own request to cancel. */
   CancellationWithdrawn = 'CANCELLATION_WITHDRAWN',
   /**
-   * The booking was cancelled: the actor accepted the other party's request to
-   * cancel, or both parties marked it failed (the actor second).
+   * The booking was cancelled: the actor cancelled it on their own (until 24
+   * hours before the booked start, BE-125), accepted the other party's request
+   * to cancel, or both parties marked it failed (the actor second).
    */
   OrderCancelled = 'ORDER_CANCELLED',
   /**
@@ -3129,7 +3368,15 @@ export enum TaskTimelineEventType {
   RescheduleConfirmed = 'RESCHEDULE_CONFIRMED',
   /** The actor declined the other party's new time; the booking keeps its time. */
   RescheduleDeclined = 'RESCHEDULE_DECLINED',
-  /** The actor asked to move the booking to a new time. */
+  /**
+   * A request for new times lapsed unanswered at the booked start: the booking
+   * keeps its time (BE-125). No actor.
+   */
+  RescheduleLapsed = 'RESCHEDULE_LAPSED',
+  /**
+   * The actor asked to move the booking to a new time, or answered the other
+   * party's request with new times of their own, which replace it (BE-125).
+   */
   RescheduleRequested = 'RESCHEDULE_REQUESTED',
   /** The actor withdrew their own request for a new time. */
   RescheduleWithdrawn = 'RESCHEDULE_WITHDRAWN',
@@ -3166,8 +3413,9 @@ export enum TaskTimelineEventType {
 export type Thread = {
   /**
    * The next step waiting on the viewer. Null when nothing is waiting, including
-   * on a system thread, for a worker who was not awarded the task, and while
-   * the task or the other party on the booking is suspended.
+   * on a system thread, for a worker who was not awarded the task (except
+   * `QUOTE_INVITATION` while they were asked to quote on the OPEN task), and
+   * while the task or the other party on the booking is suspended.
    */
   attention?: Maybe<ThreadAttention>;
   /** The viewer blocked `otherParty`. */
@@ -3213,7 +3461,12 @@ export enum ThreadAttentionKind {
   CompareQuotes = 'COMPARE_QUOTES',
   ConfirmDone = 'CONFIRM_DONE',
   Conflict = 'CONFLICT',
-  MarkDone = 'MARK_DONE'
+  MarkDone = 'MARK_DONE',
+  /**
+   * The viewer (a worker) was asked to quote on this OPEN task and has not
+   * quoted or chosen "Not for me". Never for the owner.
+   */
+  QuoteInvitation = 'QUOTE_INVITATION'
 }
 
 export type ThreadItem = {
@@ -3325,6 +3578,7 @@ export type UpdateMyProfileInput = {
 };
 
 export type UpdateMySettingsInput = {
+  acceptsQuoteInvitations?: InputMaybe<Scalars['Boolean']['input']>;
   hideTaskPostingNotice?: InputMaybe<Scalars['Boolean']['input']>;
   isProfilePrivate?: InputMaybe<Scalars['Boolean']['input']>;
   language?: InputMaybe<UserLanguage>;
@@ -3374,6 +3628,11 @@ export type UpdateWorkerProfileInput = {
 };
 
 export type User = {
+  /**
+   * When they confirmed they are 18 or over at sign-up (the same line as the
+   * Terms). Owner and admins only, as `termsAcceptedAt`.
+   */
+  ageConfirmedAt?: Maybe<Scalars['DateTime']['output']>;
   /**
    * Address on the linked Apple account, including a Hide My Email relay. This
    * is only the mapping for that login. It is not `email`, and it does not have
@@ -3472,7 +3731,7 @@ export type User = {
   /**
    * Owner (`me`) and admin only. Every other viewer gets the default shell
    * (`isProfilePrivate: true`, `marketingEmails: false`,
-   * `hideTaskPostingNotice: false`, default language).
+   * `hideTaskPostingNotice: false`, `acceptsQuoteInvitations: true`, default language).
    */
   settings: UserSettings;
   /**
@@ -3488,10 +3747,23 @@ export type User = {
    */
   taskAchievements: MyTasksAchievements;
   /**
-   * Tasks the user posted. For anyone but the user and ops, suspended tasks are
-   * left out.
+   * Every task the user posted, in any status (drafts, cancelled and suspended
+   * included). Only the user themself and ops get the list: for anyone else,
+   * signed in or not, it is empty. A person's open tasks are on
+   * `PublicUser.openTasks`.
    */
   tasksPosted: Array<Task>;
+  /**
+   * When this person agreed to the Terms and Privacy Policy at sign-up (BE-128).
+   * Owner (`me`) and admins only; null for everyone else, and for accounts made
+   * before BE-128 or by an app that did not send `consent`.
+   */
+  termsAcceptedAt?: Maybe<Scalars['DateTime']['output']>;
+  /**
+   * The Terms they agreed to: the Terms page's Last updated date, `YYYY-MM-DD`.
+   * Owner and admins only, as `termsAcceptedAt`.
+   */
+  termsVersion?: Maybe<Scalars['String']['output']>;
   /**
    * Messages inbox: task threads and the Slashie system thread this user takes
    * part in, most recently active first. Owner-only (`me`); empty for other viewers.
@@ -3543,6 +3815,12 @@ export type UserPage = {
 
 export type UserSettings = {
   /**
+   * Let customers ask me to quote on their open tasks (`askWorkerToQuote`).
+   * On by default, also for accounts that never set it. When off, new
+   * invitations are refused; ones already sent stay.
+   */
+  acceptsQuoteInvitations: Scalars['Boolean']['output'];
+  /**
    * Owner chose not to see the allowed-task notice on Post a task again.
    * Missing on older accounts, which still see the notice.
    */
@@ -3550,6 +3828,18 @@ export type UserSettings = {
   isProfilePrivate: Scalars['Boolean']['output'];
   language: UserLanguage;
   marketingEmails: Scalars['Boolean']['output'];
+};
+
+/** The invited worker's own view of the invitation on a task. */
+export type ViewerQuoteInvitation = {
+  createdAt: Scalars['DateTime']['output'];
+  /** The customer's display name. */
+  customerName: Scalars['String']['output'];
+  /**
+   * The worker chose "Not for me". The invitation still exists, but nothing
+   * waits on them (`Thread.attention` is null).
+   */
+  dismissed: Scalars['Boolean']['output'];
 };
 
 /** Browser Push API subscription. `p256dh` and `auth` are stored but not readable. */
@@ -3632,7 +3922,11 @@ export type WorkerMembership = {
   /** True when the worker has a Stripe customer id and can open the billing portal. */
   canManageBilling: Scalars['Boolean']['output'];
   canStartTrial: Scalars['Boolean']['output'];
-  /** True when the worker can start Checkout for Slashie Unlimited (no unlimited access, billing configured). */
+  /**
+   * True when the worker can start Checkout for Slashie Pro (no unlimited access, billing configured).
+   * Also true while Slashie Pro given in admin runs until a date: Checkout's first
+   * charge is then on that date (BE-119).
+   */
   canUpgrade: Scalars['Boolean']['output'];
   /** True when Stripe `cancel_at_period_end` is set on the live subscription. */
   cancelAtPeriodEnd: Scalars['Boolean']['output'];
@@ -3648,9 +3942,15 @@ export type WorkerMembership = {
    * Withdrawn and soft-deleted quotes still count. Edits on the same task do not add another.
    */
   quotesUsedThisMonth: Scalars['Int']['output'];
-  /** One-line helper for subtitles (e.g. trial end date, payment reminder). */
+  /**
+   * One-line helper for subtitles (e.g. trial end date, payment reminder), in English.
+   * @deprecated English only; the apps write their own line (BE-88). Kept for app builds already installed.
+   */
   statusDescription?: Maybe<Scalars['String']['output']>;
-  /** Short badge label (Free, Trial, Active, Past due, etc.). Prefer this over re-deriving on the client. */
+  /**
+   * Short badge label (Free, Trial, Active, Past due, etc.), in English.
+   * @deprecated English only; the apps build the label from the flags, status and dates (BE-88). Kept for app builds already installed.
+   */
   statusLabel: Scalars['String']['output'];
   subscriptionStatus: WorkerSubscriptionStatus;
   trialEndsAt?: Maybe<Scalars['DateTime']['output']>;
@@ -3689,6 +3989,18 @@ export enum WorkerProfileGap {
  * viewers; drives the Save / Leave a review / Contact states on the profile page.
  */
 export type WorkerProfileViewer = {
+  /**
+   * The viewer's own OPEN, unsuspended tasks, newest first. Empty when
+   * `canAskToQuote` is false.
+   */
+  askableTasks: Array<AskableTask>;
+  /**
+   * True when this signed-in viewer could ask this worker to quote at all: the
+   * worker has a public profile, accepts invitations, is not the viewer and
+   * there is no block either way. It does not depend on the viewer having an
+   * open task: with none, clients send them to Post a task first.
+   */
+  canAskToQuote: Scalars['Boolean']['output'];
   /**
    * True when the viewer still has a completed job with this worker that they
    * have not reviewed. False once every finished job is reviewed. There is no
@@ -3817,7 +4129,10 @@ export type WorkerTaskAchievements = {
 };
 
 export type Worker = {
-  /** Unlimited quotes given by Slashie in admin (BE-117), or null. Admin only. */
+  /**
+   * Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117), or null.
+   * Admin only. The field and type keep their old names so the admin app keeps working.
+   */
   adminUnlimited?: Maybe<AdminUnlimited>;
   bio?: Maybe<Scalars['String']['output']>;
   /**
@@ -3863,7 +4178,11 @@ export type Worker = {
   locationLng?: Maybe<Scalars['Float']['output']>;
   /** When the worker joined Slashie (linked user's registration date). */
   memberSince?: Maybe<Scalars['DateTime']['output']>;
-  /** Platform subscription plan and quote usage. Stripe-verified when the viewer is the worker. */
+  /**
+   * Platform subscription plan and quote usage, checked against Stripe. Only the
+   * worker themself (`me.worker`) and ops can read it: `FORBIDDEN` for anyone
+   * else, signed in or not.
+   */
   membership: WorkerMembership;
   /**
    * Public trust signal from the linked user account (Trust & verification card).
@@ -3871,7 +4190,12 @@ export type Worker = {
    * Verify approval (`phoneVerified` + `phoneVerifiedAt` + a saved phone number).
    */
   phoneVerified: Scalars['Boolean']['output'];
-  /** Optional portfolio image URLs (setup step `verify.portfolio`). */
+  /**
+   * Photos of the worker's work (setup step `verify.portfolio`), uploaded with
+   * `finalizePortfolioImage` and served from our own storage. A link to another
+   * host can no longer be saved (BE-126); one left from before is returned to
+   * the worker themself and ops only, never to other people (BE-120).
+   */
   portfolioUrls: Array<Scalars['String']['output']>;
   /**
    * Base location. `name` is the town. The worker gets the exact point and
@@ -3930,6 +4254,20 @@ export type Worker = {
    */
   skills: Array<Scalars['String']['output']>;
   tagline?: Maybe<Scalars['String']['output']>;
+  /**
+   * The title the worker picked (BE-130, a Slashie Pro feature): one of
+   * the setup trades, shown in the viewer's language on their profile (in place
+   * of "Worker") and on Find workers and quote cards. Null unless they have
+   * Slashie Pro now (a choice kept from an earlier membership stays hidden); then
+   * clients show "Worker" where a role label shows, and nothing elsewhere.
+   */
+  title?: Maybe<WorkerPrimaryCategory>;
+  /**
+   * The title the worker saved, whatever their membership. The worker only;
+   * null for everyone else. For the profile editor, which shows it locked
+   * after Slashie Pro ends.
+   */
+  titleChoice?: Maybe<WorkerPrimaryCategory>;
   /** How far the worker is willing to travel from their base location, in miles. */
   travelRadiusMiles?: Maybe<Scalars['Float']['output']>;
   user: User;
@@ -4005,7 +4343,7 @@ export type AdminUserDetailQueryVariables = Exact<{
 }>;
 
 
-export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, membership: { planName: string, statusLabel: string, statusDescription?: string | null, subscriptionStatus: WorkerSubscriptionStatus, currentPeriodEnd?: any | null, hasUnlimitedQuotes: boolean, quotesUsedThisMonth: number, freeQuotesPerMonth: number }, adminUnlimited?: { until?: any | null, grantedAt: any, grantedBy?: string | null } | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null } }> } };
+export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, membership: { planName: string, subscriptionStatus: WorkerSubscriptionStatus, trialEndsAt?: any | null, currentPeriodEnd?: any | null, cancelAtPeriodEnd: boolean, hasUnlimitedQuotes: boolean, quotesUsedThisMonth: number, freeQuotesPerMonth: number }, adminUnlimited?: { until?: any | null, grantedAt: any, grantedBy?: string | null } | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null } }> } };
 
 export type AdminUpdateTaskMutationVariables = Exact<{
   id: Scalars['ID']['input'];
