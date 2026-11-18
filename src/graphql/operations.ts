@@ -291,7 +291,7 @@ export const AdminUserDetail = gql`
         ...UserAdminFields
         worker {
           id
-          # The plan as the worker sees it, and Unlimited given in admin (BE-117).
+          # The plan as the worker sees it, and Slashie Pro given in admin (BE-117).
           membership {
             planName
             subscriptionStatus

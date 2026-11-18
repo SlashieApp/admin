@@ -30,7 +30,7 @@ type Worker = NonNullable<
 >
 
 /**
- * Give a worker Unlimited quotes (BE-117): until a date or with no end, as if
+ * Give a worker Slashie Pro (BE-117): until a date or with no end, as if
  * they had paid with no auto-renew. Stripe is never touched, so a worker who
  * already pays keeps paying. `onChanged` reloads the user.
  */
@@ -68,7 +68,7 @@ export function WorkerUnlimited({
         mutation: AdminSetWorkerPro,
         variables: { userId, until: chosen.until?.toISOString() ?? null },
       })
-      setDone('Unlimited given.')
+      setDone('Slashie Pro given.')
       onChanged()
     } catch (err) {
       setError(graphqlErrorMessage(err))
@@ -86,7 +86,7 @@ export function WorkerUnlimited({
         mutation: AdminEndWorkerPro,
         variables: { userId },
       })
-      setDone('Unlimited ended.')
+      setDone('Slashie Pro ended.')
       onChanged()
     } catch (err) {
       setError(graphqlErrorMessage(err))
@@ -104,7 +104,7 @@ export function WorkerUnlimited({
 
   return (
     <div className="stack">
-      <h3>Unlimited quotes</h3>
+      <h3>Slashie Pro</h3>
       <dl className="kv">
         <div>
           <dt>Plan</dt>
@@ -124,7 +124,7 @@ export function WorkerUnlimited({
       {given ? <p className="meta">{describeUnlimited(given)}</p> : null}
       {paid ? (
         <p className="banner banner-warn">
-          {"This worker has a paid plan. Giving Unlimited doesn't stop their billing."}
+          {"This worker has a paid plan. Giving Slashie Pro doesn't stop their billing."}
         </p>
       ) : null}
       {error ? <p className="banner banner-error">{error}</p> : null}
@@ -162,11 +162,11 @@ export function WorkerUnlimited({
         </label>
       ) : null}
       <ConfirmAction
-        label={active ? 'Replace Unlimited' : 'Give Unlimited'}
+        label={active ? 'Replace Slashie Pro' : 'Give Slashie Pro'}
         busyLabel="Saving…"
         confirmText={
           untilText
-            ? `Give this worker Unlimited quotes ${untilText}? It reads like a paid plan with no auto-renew. Nothing changes in Stripe.`
+            ? `Give this worker Slashie Pro ${untilText}? It reads like a paid plan with no auto-renew. Nothing changes in Stripe.`
             : 'Pick an end date first.'
         }
         busy={busy}
@@ -175,9 +175,9 @@ export function WorkerUnlimited({
       {active ? (
         <ConfirmAction
           danger
-          label="End Unlimited now"
+          label="End Slashie Pro now"
           busyLabel="Ending…"
-          confirmText="End this worker's Unlimited now? They go back to Free and the monthly quote limit."
+          confirmText="End this worker's Slashie Pro now? They go back to Free and the monthly quote limit."
           busy={busy}
           onConfirm={() => void end()}
         />
