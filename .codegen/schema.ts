@@ -183,6 +183,22 @@ export type AdminOpsSummary = {
   workersRegistered: AdminOpsMetric;
 };
 
+/**
+ * Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117). While it
+ * lasts and the worker has no live Stripe plan, `membership` reads as a paid Slashie Pro plan
+ * with no auto-renew that ends at `until` (no end when null). Stripe is never
+ * told, and a worker who pays keeps paying. There's no Stripe plan to manage
+ * (`canManageBilling` false); with an end date the worker can start a paid
+ * plan whose first charge is on that date (`canUpgrade`, BE-119).
+ */
+export type AdminPro = {
+  grantedAt: Scalars['DateTime']['output'];
+  /** The admin who gave it: their name, else their email. */
+  grantedBy?: Maybe<Scalars['String']['output']>;
+  /** When it ends; null for no end. */
+  until?: Maybe<Scalars['DateTime']['output']>;
+};
+
 export type AdminReviewSignal = {
   abuseFlags: Array<ReviewAbuseFlag>;
   review: Review;
@@ -342,19 +358,10 @@ export type AdminTaskStatusCount = {
   status: TaskStatus;
 };
 
-/**
- * Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117). While it
- * lasts and the worker has no live Stripe plan, `membership` reads as a paid Slashie Pro plan
- * with no auto-renew that ends at `until` (no end when null). Stripe is never
- * told, and a worker who pays keeps paying. There's no Stripe plan to manage
- * (`canManageBilling` false); with an end date the worker can start a paid
- * plan whose first charge is on that date (`canUpgrade`, BE-119).
- */
+/** The same as `AdminPro`, under its old name (BE-136). Read `Worker.adminPro`. */
 export type AdminUnlimited = {
   grantedAt: Scalars['DateTime']['output'];
-  /** The admin who gave it: their name, else their email. */
   grantedBy?: Maybe<Scalars['String']['output']>;
-  /** When it ends; null for no end. */
   until?: Maybe<Scalars['DateTime']['output']>;
 };
 
@@ -792,6 +799,11 @@ export type Mutation = {
    * Ends an admin-given Slashie Pro now (BE-117). A no-op when there is none.
    * Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
    */
+  adminEndWorkerPro: User;
+  /**
+   * The same as `adminEndWorkerPro`, under its old name.
+   * @deprecated Use `adminEndWorkerPro` (BE-136).
+   */
   adminEndWorkerUnlimited: User;
   /** Ops soft-hide. Keeps the row. Does not add the author review-then-delete flag. */
   adminHideReview: Review;
@@ -834,7 +846,12 @@ export type Mutation = {
    * when `until` is null, replacing any earlier one (BE-117). Their plan reads as
    * a paid Slashie Pro plan with no auto-renew; at `until` it goes back to Free. Nothing
    * changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
-   * `INVALID_UNLIMITED_UNTIL` (not in the future).
+   * `INVALID_PRO_UNTIL` (not in the future).
+   */
+  adminSetWorkerPro: User;
+  /**
+   * The same as `adminSetWorkerPro`, under its old name.
+   * @deprecated Use `adminSetWorkerPro` (BE-136).
    */
   adminSetWorkerUnlimited: User;
   /** Set product-feedback status. Does not send the draft reply. */
@@ -1138,7 +1155,7 @@ export type Mutation = {
   setPassword: User;
   /**
    * Pick the title shown with this worker (BE-130), or clear it with null.
-   * Picking one needs Slashie Pro: `UNLIMITED_REQUIRED` otherwise.
+   * Picking one needs Slashie Pro: `PRO_REQUIRED` otherwise.
    * Clearing always works. No worker profile: `NOT_A_WORKER`.
    */
   setWorkerTitle: Worker;
@@ -1246,6 +1263,11 @@ export type MutationAddQuoteArgs = {
 };
 
 
+export type MutationAdminEndWorkerProArgs = {
+  userId: Scalars['ID']['input'];
+};
+
+
 export type MutationAdminEndWorkerUnlimitedArgs = {
   userId: Scalars['ID']['input'];
 };
@@ -1270,6 +1292,12 @@ export type MutationAdminSetTaskSuspendedArgs = {
 export type MutationAdminSetUserDisabledArgs = {
   disabled: Scalars['Boolean']['input'];
   id: Scalars['ID']['input'];
+};
+
+
+export type MutationAdminSetWorkerProArgs = {
+  until?: InputMaybe<Scalars['DateTime']['input']>;
+  userId: Scalars['ID']['input'];
 };
 
 
@@ -3927,6 +3955,12 @@ export type WorkerMembership = {
   canceledAt?: Maybe<Scalars['DateTime']['output']>;
   currentPeriodEnd?: Maybe<Scalars['DateTime']['output']>;
   freeQuotesPerMonth: Scalars['Int']['output'];
+  /** True while the worker has Slashie Pro (paid, trialing or given in admin): no limit on quotes. */
+  hasPro: Scalars['Boolean']['output'];
+  /**
+   * The same as `hasPro`, under its old name.
+   * @deprecated Use `hasPro` (BE-136).
+   */
   hasUnlimitedQuotes: Scalars['Boolean']['output'];
   planName: Scalars['String']['output'];
   quotesRemainingThisMonth: Scalars['Int']['output'];
@@ -4084,7 +4118,7 @@ export type WorkerTaskAchievements = {
   completedJobsCount: Scalars['Int']['output'];
   /**
    * Free-tier cap for `quotesThisMonth` (3 per UTC month). Stays 3 when the
-   * worker has unlimited quotes; clients should read `hasUnlimitedQuotes`.
+   * worker has unlimited quotes; clients should read `hasPro`.
    */
   freeQuotesPerMonth: Scalars['Int']['output'];
   /**
@@ -4093,8 +4127,13 @@ export type WorkerTaskAchievements = {
    */
   hasActivity: Scalars['Boolean']['output'];
   /**
-   * True when the stored membership currently allows unlimited quotes.
+   * True when the stored membership currently allows unlimited quotes (Slashie Pro).
    * This is not a money amount and is not added into agreed totals.
+   */
+  hasPro: Scalars['Boolean']['output'];
+  /**
+   * The same as `hasPro`, under its old name.
+   * @deprecated Use `hasPro` (BE-136).
    */
   hasUnlimitedQuotes: Scalars['Boolean']['output'];
   /** Most common area on those `COMPLETED` worker orders. Null when none have a place label. */
@@ -4114,7 +4153,12 @@ export type WorkerTaskAchievements = {
 export type Worker = {
   /**
    * Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117), or null.
-   * Admin only. The field and type keep their old names so the admin app keeps working.
+   * Admin only.
+   */
+  adminPro?: Maybe<AdminPro>;
+  /**
+   * The same as `adminPro`, under its old name.
+   * @deprecated Use `adminPro` (BE-136).
    */
   adminUnlimited?: Maybe<AdminUnlimited>;
   bio?: Maybe<Scalars['String']['output']>;
@@ -4137,6 +4181,15 @@ export type Worker = {
    * email address itself.
    */
   emailVerified: Scalars['Boolean']['output'];
+  /**
+   * Whether the worker has Slashie Pro now (BE-137): for a Pro badge on their
+   * profile and Find workers cards. Anyone can read it. Same rule as `title`,
+   * from what is stored (never asks Stripe): on during a trial, an active plan, a
+   * plan ending at the period end, or Pro given by Slashie; off while a payment
+   * is failing, paused, unfinished or ended. The rest of the plan stays in
+   * `membership`, for the worker and ops only (BE-118).
+   */
+  hasPro: Scalars['Boolean']['output'];
   id: Scalars['ID']['output'];
   /**
    * Identity verification progress (Trust & verification card). Distinguishes
@@ -4326,7 +4379,7 @@ export type AdminUserDetailQueryVariables = Exact<{
 }>;
 
 
-export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, membership: { planName: string, subscriptionStatus: WorkerSubscriptionStatus, trialEndsAt?: any | null, currentPeriodEnd?: any | null, cancelAtPeriodEnd: boolean, hasUnlimitedQuotes: boolean, quotesUsedThisMonth: number, freeQuotesPerMonth: number }, adminUnlimited?: { until?: any | null, grantedAt: any, grantedBy?: string | null } | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null } }> } };
+export type AdminUserDetailQuery = { adminUsers: { items: Array<{ id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, membership: { planName: string, subscriptionStatus: WorkerSubscriptionStatus, trialEndsAt?: any | null, currentPeriodEnd?: any | null, cancelAtPeriodEnd: boolean, hasPro: boolean, quotesUsedThisMonth: number, freeQuotesPerMonth: number }, adminPro?: { until?: any | null, grantedAt: any, grantedBy?: string | null } | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null, tasksPosted: Array<{ id: string, title: string, status: TaskStatus, categories: Array<string> }>, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null } }> } };
 
 export type AdminUpdateTaskMutationVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -4352,20 +4405,20 @@ export type AdminUpdateUserMutationVariables = Exact<{
 
 export type AdminUpdateUserMutation = { adminUpdateUser: { id: string, email: string, emailVerified: boolean, phoneVerified: boolean, createdAt: any, disabled: boolean, profile: { name?: string | null, contactNumber?: string | null, avatarUrl?: string | null }, worker?: { id: string, userId: string, legalName?: string | null, tagline?: string | null, bio?: string | null, primaryCategory?: WorkerPrimaryCategory | null, yearsExperience?: number | null, isVerified: boolean, identityVerification: IdentityVerificationStatus, skills: Array<string>, phoneVerified: boolean, emailVerified: boolean, memberSince?: any | null, serviceAreaLabel?: string | null, profile: { name?: string | null, avatarUrl?: string | null, contactNumber?: string | null }, ratingSummary: { average?: number | null, count: number } } | null } };
 
-export type AdminSetWorkerUnlimitedMutationVariables = Exact<{
+export type AdminSetWorkerProMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
   until?: InputMaybe<Scalars['DateTime']['input']>;
 }>;
 
 
-export type AdminSetWorkerUnlimitedMutation = { adminSetWorkerUnlimited: { id: string } };
+export type AdminSetWorkerProMutation = { adminSetWorkerPro: { id: string } };
 
-export type AdminEndWorkerUnlimitedMutationVariables = Exact<{
+export type AdminEndWorkerProMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
 }>;
 
 
-export type AdminEndWorkerUnlimitedMutation = { adminEndWorkerUnlimited: { id: string } };
+export type AdminEndWorkerProMutation = { adminEndWorkerPro: { id: string } };
 
 export type AdminSetUserDisabledMutationVariables = Exact<{
   id: Scalars['ID']['input'];

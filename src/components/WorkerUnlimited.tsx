@@ -4,8 +4,8 @@ import { useState } from 'react'
 
 import { ConfirmAction } from '@/components/ConfirmAction'
 import {
-  AdminEndWorkerUnlimited,
-  AdminSetWorkerUnlimited,
+  AdminEndWorkerPro,
+  AdminSetWorkerPro,
 } from '@/graphql/operations'
 import { apolloClient } from '@/lib/apollo'
 import { graphqlErrorMessage } from '@/lib/graphqlErrors'
@@ -20,8 +20,8 @@ import {
   unlimitedUntil,
 } from '@/lib/unlimited'
 import type {
-  AdminEndWorkerUnlimitedMutation,
-  AdminSetWorkerUnlimitedMutation,
+  AdminEndWorkerProMutation,
+  AdminSetWorkerProMutation,
   AdminUserDetailQuery,
 } from '@codegen/schema'
 
@@ -49,7 +49,7 @@ export function WorkerUnlimited({
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  const given = worker.adminUnlimited as AdminUnlimitedView
+  const given = worker.adminPro as AdminUnlimitedView
   const active = unlimitedIsActive(given)
   const paid = hasPaidPlan(worker.membership, given)
   const membership = worker.membership
@@ -64,8 +64,8 @@ export function WorkerUnlimited({
     setError(null)
     setDone(null)
     try {
-      await apolloClient.mutate<AdminSetWorkerUnlimitedMutation>({
-        mutation: AdminSetWorkerUnlimited,
+      await apolloClient.mutate<AdminSetWorkerProMutation>({
+        mutation: AdminSetWorkerPro,
         variables: { userId, until: chosen.until?.toISOString() ?? null },
       })
       setDone('Unlimited given.')
@@ -82,8 +82,8 @@ export function WorkerUnlimited({
     setError(null)
     setDone(null)
     try {
-      await apolloClient.mutate<AdminEndWorkerUnlimitedMutation>({
-        mutation: AdminEndWorkerUnlimited,
+      await apolloClient.mutate<AdminEndWorkerProMutation>({
+        mutation: AdminEndWorkerPro,
         variables: { userId },
       })
       setDone('Unlimited ended.')
@@ -115,7 +115,7 @@ export function WorkerUnlimited({
         <div>
           <dt>Quotes this month</dt>
           <dd>
-            {membership.hasUnlimitedQuotes
+            {membership.hasPro
               ? `${membership.quotesUsedThisMonth} (no limit)`
               : `${membership.quotesUsedThisMonth} of ${membership.freeQuotesPerMonth}`}
           </dd>

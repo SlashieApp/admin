@@ -298,11 +298,11 @@ export const AdminUserDetail = gql`
             trialEndsAt
             currentPeriodEnd
             cancelAtPeriodEnd
-            hasUnlimitedQuotes
+            hasPro
             quotesUsedThisMonth
             freeQuotesPerMonth
           }
-          adminUnlimited {
+          adminPro {
             until
             grantedAt
             grantedBy
@@ -347,17 +347,17 @@ export const AdminUpdateUser = gql`
   }
 `
 
-export const AdminSetWorkerUnlimited = gql`
-  mutation AdminSetWorkerUnlimited($userId: ID!, $until: DateTime) {
-    adminSetWorkerUnlimited(userId: $userId, until: $until) {
+export const AdminSetWorkerPro = gql`
+  mutation AdminSetWorkerPro($userId: ID!, $until: DateTime) {
+    adminSetWorkerPro(userId: $userId, until: $until) {
       id
     }
   }
 `
 
-export const AdminEndWorkerUnlimited = gql`
-  mutation AdminEndWorkerUnlimited($userId: ID!) {
-    adminEndWorkerUnlimited(userId: $userId) {
+export const AdminEndWorkerPro = gql`
+  mutation AdminEndWorkerPro($userId: ID!) {
+    adminEndWorkerPro(userId: $userId) {
       id
     }
   }

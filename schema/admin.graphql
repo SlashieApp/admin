@@ -516,14 +516,26 @@ extend type Mutation {
   when `until` is null, replacing any earlier one (BE-117). Their plan reads as
   a paid Slashie Pro plan with no auto-renew; at `until` it goes back to Free. Nothing
   changes in Stripe. Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`,
-  `INVALID_UNLIMITED_UNTIL` (not in the future).
+  `INVALID_PRO_UNTIL` (not in the future).
   """
-  adminSetWorkerUnlimited(userId: ID!, until: DateTime): User! @admin
+  adminSetWorkerPro(userId: ID!, until: DateTime): User! @admin
   """
   Ends an admin-given Slashie Pro now (BE-117). A no-op when there is none.
   Errors: `USER_NOT_FOUND`, `NOT_A_WORKER`.
   """
-  adminEndWorkerUnlimited(userId: ID!): User! @admin
+  adminEndWorkerPro(userId: ID!): User! @admin
+  """
+  The same as `adminSetWorkerPro`, under its old name.
+  """
+  adminSetWorkerUnlimited(userId: ID!, until: DateTime): User!
+    @admin
+    @deprecated(reason: "Use `adminSetWorkerPro` (BE-136).")
+  """
+  The same as `adminEndWorkerPro`, under its old name.
+  """
+  adminEndWorkerUnlimited(userId: ID!): User!
+    @admin
+    @deprecated(reason: "Use `adminEndWorkerPro` (BE-136).")
   """
   Set report status for the ops inbox. Same `reports` collection as BE-40
   `updateReportStatus` (env allowlist). Does not require ADMIN_EMAILS.
@@ -583,7 +595,14 @@ type WorkerMembership {
   """
   quotesUsedThisMonth: Int!
   quotesRemainingThisMonth: Int!
-  hasUnlimitedQuotes: Boolean!
+  """
+  True while the worker has Slashie Pro (paid, trialing or given in admin): no limit on quotes.
+  """
+  hasPro: Boolean!
+  """
+  The same as `hasPro`, under its old name.
+  """
+  hasUnlimitedQuotes: Boolean! @deprecated(reason: "Use `hasPro` (BE-136).")
   subscriptionStatus: WorkerSubscriptionStatus!
   trialEndsAt: DateTime
   currentPeriodEnd: DateTime
@@ -3767,14 +3786,18 @@ type WorkerTaskAchievements {
   quotesThisMonth: Int!
   """
   Free-tier cap for `quotesThisMonth` (3 per UTC month). Stays 3 when the
-  worker has unlimited quotes; clients should read `hasUnlimitedQuotes`.
+  worker has unlimited quotes; clients should read `hasPro`.
   """
   freeQuotesPerMonth: Int!
   """
-  True when the stored membership currently allows unlimited quotes.
+  True when the stored membership currently allows unlimited quotes (Slashie Pro).
   This is not a money amount and is not added into agreed totals.
   """
-  hasUnlimitedQuotes: Boolean!
+  hasPro: Boolean!
+  """
+  The same as `hasPro`, under its old name.
+  """
+  hasUnlimitedQuotes: Boolean! @deprecated(reason: "Use `hasPro` (BE-136).")
   """
   Consecutive UTC weeks (Monday 00:00 start), ending this week, that each
   contain at least one `COMPLETED` worker order. Zero when this week has none.
@@ -4316,6 +4339,15 @@ type worker
   """
   title: WorkerPrimaryCategory
   """
+  Whether the worker has Slashie Pro now (BE-137): for a Pro badge on their
+  profile and Find workers cards. Anyone can read it. Same rule as `title`,
+  from what is stored (never asks Stripe): on during a trial, an active plan, a
+  plan ending at the period end, or Pro given by Slashie; off while a payment
+  is failing, paused, unfinished or ended. The rest of the plan stays in
+  `membership`, for the worker and ops only (BE-118).
+  """
+  hasPro: Boolean!
+  """
   The title the worker saved, whatever their membership. The worker only;
   null for everyone else. For the profile editor, which shows it locked
   after Slashie Pro ends.
@@ -4427,9 +4459,15 @@ type worker
   membership: WorkerMembership!
   """
   Slashie Pro (unlimited quotes) given by Slashie in admin (BE-117), or null.
-  Admin only. The field and type keep their old names so the admin app keeps working.
+  Admin only.
   """
-  adminUnlimited: AdminUnlimited @admin
+  adminPro: AdminPro @admin
+  """
+  The same as `adminPro`, under its old name.
+  """
+  adminUnlimited: AdminUnlimited
+    @admin
+    @deprecated(reason: "Use `adminPro` (BE-136).")
   """
   Tasks this worker has quoted on (viewer must be the worker).
   """
@@ -4448,7 +4486,7 @@ told, and a worker who pays keeps paying. There's no Stripe plan to manage
 (`canManageBilling` false); with an end date the worker can start a paid
 plan whose first charge is on that date (`canUpgrade`, BE-119).
 """
-type AdminUnlimited {
+type AdminPro {
   """
   When it ends; null for no end.
   """
@@ -4457,6 +4495,15 @@ type AdminUnlimited {
   """
   The admin who gave it: their name, else their email.
   """
+  grantedBy: String
+}
+
+"""
+The same as `AdminPro`, under its old name (BE-136). Read `Worker.adminPro`.
+"""
+type AdminUnlimited {
+  until: DateTime
+  grantedAt: DateTime!
   grantedBy: String
 }
 
@@ -4663,7 +4710,7 @@ extend type Mutation {
   updateWorkerProfile(input: UpdateWorkerProfileInput!): worker! @auth
   """
   Pick the title shown with this worker (BE-130), or clear it with null.
-  Picking one needs Slashie Pro: `UNLIMITED_REQUIRED` otherwise.
+  Picking one needs Slashie Pro: `PRO_REQUIRED` otherwise.
   Clearing always works. No worker profile: `NOT_A_WORKER`.
   """
   setWorkerTitle(title: WorkerPrimaryCategory): worker! @auth
