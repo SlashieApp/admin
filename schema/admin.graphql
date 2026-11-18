@@ -585,20 +585,6 @@ type WorkerMembership {
   quotesRemainingThisMonth: Int!
   hasUnlimitedQuotes: Boolean!
   subscriptionStatus: WorkerSubscriptionStatus!
-  """
-  Short badge label (Free, Trial, Active, Past due, etc.), in English.
-  """
-  statusLabel: String!
-    @deprecated(
-      reason: "English only; the apps build the label from the flags, status and dates (BE-88). Kept for app builds already installed."
-    )
-  """
-  One-line helper for subtitles (e.g. trial end date, payment reminder), in English.
-  """
-  statusDescription: String
-    @deprecated(
-      reason: "English only; the apps write their own line (BE-88). Kept for app builds already installed."
-    )
   trialEndsAt: DateTime
   currentPeriodEnd: DateTime
   """
@@ -1538,10 +1524,6 @@ type Pricing {
   renaming the Stripe product never changes what the apps show (BE-131).
   """
   productName: String!
-  description: String
-    @deprecated(
-      reason: "English only; the apps write their own copy (BE-88). Kept for app builds already installed."
-    )
   """
   Amount in minor currency units (e.g. 1999 = £19.99).
   """
@@ -1557,13 +1539,6 @@ type Pricing {
   The Price's own trial when it has one, otherwise 180. Same source as Checkout.
   """
   trialDays: Int
-  """
-  Human-readable trial label for marketing copy (e.g. "6 months free").
-  """
-  trialLabel: String
-    @deprecated(
-      reason: "English only; build the trial line from `trialDays` (BE-88). Kept for app builds already installed."
-    )
   """
   Free-tier monthly allowance: distinct tasks a worker may newly quote, without a subscription.
   """

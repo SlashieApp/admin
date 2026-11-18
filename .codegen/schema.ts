@@ -1875,8 +1875,6 @@ export type PriceInput = {
 
 /** Public Slashie Pro catalog for the /pricing page (Stripe-backed). */
 export type Pricing = {
-  /** @deprecated English only; the apps write their own copy (BE-88). Kept for app builds already installed. */
-  description?: Maybe<Scalars['String']['output']>;
   /** Free-tier monthly allowance: distinct tasks a worker may newly quote, without a subscription. */
   freeQuotesPerMonth: Scalars['Int']['output'];
   /** Amount in minor currency units (e.g. 1999 = £19.99). */
@@ -1899,11 +1897,6 @@ export type Pricing = {
    * The Price's own trial when it has one, otherwise 180. Same source as Checkout.
    */
   trialDays?: Maybe<Scalars['Int']['output']>;
-  /**
-   * Human-readable trial label for marketing copy (e.g. "6 months free").
-   * @deprecated English only; build the trial line from `trialDays` (BE-88). Kept for app builds already installed.
-   */
-  trialLabel?: Maybe<Scalars['String']['output']>;
 };
 
 export type Profile = {
@@ -3942,16 +3935,6 @@ export type WorkerMembership = {
    * Withdrawn and soft-deleted quotes still count. Edits on the same task do not add another.
    */
   quotesUsedThisMonth: Scalars['Int']['output'];
-  /**
-   * One-line helper for subtitles (e.g. trial end date, payment reminder), in English.
-   * @deprecated English only; the apps write their own line (BE-88). Kept for app builds already installed.
-   */
-  statusDescription?: Maybe<Scalars['String']['output']>;
-  /**
-   * Short badge label (Free, Trial, Active, Past due, etc.), in English.
-   * @deprecated English only; the apps build the label from the flags, status and dates (BE-88). Kept for app builds already installed.
-   */
-  statusLabel: Scalars['String']['output'];
   subscriptionStatus: WorkerSubscriptionStatus;
   trialEndsAt?: Maybe<Scalars['DateTime']['output']>;
 };
