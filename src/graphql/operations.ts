@@ -498,6 +498,22 @@ export const AdminFeedbackDraftReply = gql`
   }
 `
 
+/**
+ * Announcements (BE-69). `dryRun: true` resolves the recipient count and
+ * writes an audit row but sends nothing; `dryRun: false` sends.
+ */
+export const AdminSendSystemFlash = gql`
+  mutation AdminSendSystemFlash($input: AdminSendSystemFlashInput!) {
+    adminSendSystemFlash(input: $input) {
+      dryRun
+      recipientCount
+      audit {
+        id
+      }
+    }
+  }
+`
+
 export const AdminOpsSummary = gql`
   query AdminOpsSummary($range: AdminOpsRange!) {
     adminOpsSummary(range: $range) {

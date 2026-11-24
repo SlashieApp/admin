@@ -24,7 +24,7 @@ Add this app’s origin (local + Vercel) to the Google OAuth client’s **Author
 
 ## Nav
 
-**Dashboard | Tasks | Users | Reports | Feedback**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters. Users covers workers too (Worker filter = `isWorker`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link and a Suspend task / Unsuspend task button.
+**Dashboard | Tasks | Users | Reports | Feedback | Announcements**. Landing `/` is Tasks with a Mapbox pin map and shareable table filters. Users covers workers too (Worker filter = `isWorker`). `/reports` is the trust-and-safety inbox (default: task reports). `/feedback` is the product-feedback inbox. `/announcements` sends a Slashie announcement to chosen people or cohorts. Task detail (`/tasks/[id]`) is tabbed (Overview · Quotes · Activity · Admin/god-mode) with a live public Slashie link and a Suspend task / Unsuspend task button.
 
 ## GraphQL
 
@@ -50,6 +50,7 @@ bun run codegen && bun run test
 | `adminSetUserDisabled(id, disabled): User` | Disable / Re-enable user on user detail, after a confirm step. Disabling also suspends every task the user posted and freezes their quotes and bookings; re-enabling lifts that, but not tasks Slashie suspended directly |
 | `adminReports(status, targetType, first, after): ReportPage` / `adminUpdateReportStatus` | Reports inbox |
 | `adminFeedbackSummary`, `adminFeedbacks(status, category, first, after)`, `adminUpdateFeedbackStatus`, `adminFeedbackDraftReply` (query) | Feedback inbox |
+| `adminSendSystemFlash(input): AdminSendSystemFlashPayload` | Announcements: Check recipients (`dryRun: true`), then Send (`dryRun: false`) after a confirm step |
 
 Every list filter is sent to the API and lists page with `after` / `nextCursor`. Column sort orders the fetched page only. The panel has no filter the API cannot apply.
 
@@ -58,6 +59,7 @@ Every list filter is sent to the API and lists page with `after` / `nextCursor`.
 - **Task dossier orders**: `ACTIVE | RESCHEDULING | CANCEL_REQUESTED | CONFLICT | COMPLETED | CANCELLED`, with booked slot, pending request, reschedule history, auto-Done and closed times. A reopened task keeps its old cancelled order next to the new one, so orders are listed newest first (Latest / Earlier). Quotes show an Account suspended pill when the quoting worker's account is suspended (`Quote.workerSuspended`). Activity is Messages flashes (`FLASH`, with `visibleToUserIds`) plus the task timeline (`TIMELINE`, one row per event that raised no flash; the type is shown in words, `TASK_UPDATED` lists the changed fields, and `TASK_SUSPENDED` / `TASK_UNSUSPENDED` show "Reason: suspended by Slashie" or "Reason: poster's account suspended"; the `TASK_REOPENED` timeline row and the `TASK_CANCELLED` / `TASK_REOPENED` flashes read in words too); chat messages are not included.
 - **Reports**: status and target type (`TASK | WORKER | USER | REVIEW | MESSAGE`). Tasks and users link inside admin; workers and reviews link to the public `targetUrl`; `MESSAGE` rows show the reported text (`targetLabel`, no URL).
 - **Feedback**: status and category. Selecting an item loads `adminFeedbackDraftReply` (subject/body with Copy + optional `mailto:`). The panel does not send the reply.
+- **Announcements** (BE-69, FE-611): a title (120), a message (500) and an optional https image, sent to typed user IDs (up to 200), cohorts (`AdminCohortKey`), or both. It lands in each person's Slashie thread in Messages, with a push. There is no send-to-everyone: an empty audience is rejected by the page and by the API. Sending is two steps. Check recipients runs the mutation with `dryRun: true`, which sends nothing and returns the count and an audit id. Send is offered only while the form still matches that check and the count is above 0, and it asks "Send to N people?" first. If a send gets no answer from the API, the page says it could not be confirmed and asks for a new check, because it may have gone out. This is the only place announcements are sent from; the web app has no admin pages. `announcement.test.ts` fails when the API gains a cohort the page does not list.
 
 ## PostHog
 

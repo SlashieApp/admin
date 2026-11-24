@@ -108,6 +108,9 @@ function HeaderNavFallback({ stacked = false }: { stacked?: boolean }) {
       <Link href="/feedback" className="tab">
         Feedback
       </Link>
+      <Link href="/announcements" className="tab">
+        Announcements
+      </Link>
     </nav>
   )
 }
@@ -124,8 +127,13 @@ function HeaderNav({
   const reportsActive = pathname.startsWith('/reports')
   const feedbackActive = pathname.startsWith('/feedback')
   const usersActive = pathname.startsWith('/users')
+  const announcementsActive = pathname.startsWith('/announcements')
   const tasksActive =
-    !dashboardActive && !usersActive && !reportsActive && !feedbackActive
+    !dashboardActive &&
+    !usersActive &&
+    !reportsActive &&
+    !feedbackActive &&
+    !announcementsActive
 
   return (
     <nav className={stacked ? 'header-nav is-stacked' : 'header-nav'} aria-label="Admin sections">
@@ -168,6 +176,14 @@ function HeaderNav({
         onClick={onNavigate}
       >
         Feedback
+      </Link>
+      <Link
+        href="/announcements"
+        className={announcementsActive ? 'tab is-active' : 'tab'}
+        aria-current={announcementsActive ? 'page' : undefined}
+        onClick={onNavigate}
+      >
+        Announcements
       </Link>
     </nav>
   )

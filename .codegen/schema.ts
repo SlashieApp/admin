@@ -4480,6 +4480,13 @@ export type AdminFeedbackDraftReplyQueryVariables = Exact<{
 
 export type AdminFeedbackDraftReplyQuery = { adminFeedbackDraftReply: { subject: string, bodyText: string, bodyHtml?: string | null } };
 
+export type AdminSendSystemFlashMutationVariables = Exact<{
+  input: AdminSendSystemFlashInput;
+}>;
+
+
+export type AdminSendSystemFlashMutation = { adminSendSystemFlash: { dryRun: boolean, recipientCount: number, audit: { id: string } } };
+
 export type AdminOpsSummaryQueryVariables = Exact<{
   range: AdminOpsRange;
 }>;

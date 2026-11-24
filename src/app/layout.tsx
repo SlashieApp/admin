@@ -21,7 +21,7 @@ const jakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: 'Slashie Admin',
-  description: 'Private Slashie ops admin — dashboard, tasks, users, reports, feedback.',
+  description: 'Private Slashie ops admin — dashboard, tasks, users, reports, feedback, announcements.',
   robots: { index: false, follow: false },
   icons: {
     icon: [{ url: slashieFaviconSrc(), type: 'image/svg+xml' }],

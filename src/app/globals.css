@@ -818,6 +818,41 @@ select.input {
   font-weight: 400;
 }
 
+.field-hint {
+  font-weight: 400;
+}
+
+.field-error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--danger);
+}
+
+/* Send is not offered yet (see the hint under it), not busy. */
+.btn.is-unavailable:disabled {
+  cursor: not-allowed;
+}
+
+.announcement-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.announcement-preview-title {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.announcement-preview-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1239,7 +1274,8 @@ select.input {
 
 @media (max-width: 767px) {
   .grid-2,
-  .kv {
+  .kv,
+  .announcement-layout {
     grid-template-columns: 1fr;
   }
 
